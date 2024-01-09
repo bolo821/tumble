@@ -1,0 +1,12 @@
+/build/
+*.o
+*.a
+*.so
+*.dSYM/
+/tumble
+/out/
+/cfl-build/
+crash-*
+leak-*
+fuzz-*.log
+*.tmp
