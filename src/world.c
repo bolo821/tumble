@@ -1,0 +1,113 @@
+#include "tumble/world.h"
+#include "tumble/integrate.h"
+#include "tumble/broadphase.h"
+#include "tumble/solver.h"
+
+#include <stdlib.h>
+#include <string.h>
+
+void tmb_world_init(tmb_world *w)
+{
+    memset(w, 0, sizeof(*w));
+    w->gravity = tmb_v2(0.0f, -9.81f);
+    w->velocity_iters = 8;
+    w->position_iters = 3;
+    w->baumgarte = 0.2f;
+}
+
+void tmb_world_free(tmb_world *w)
+{
+    free(w->bodies);
+    free(w->contacts);
+    free(w->joints);
+    memset(w, 0, sizeof(*w));
+}
+
+uint32_t tmb_world_add_body(tmb_world *w, const tmb_body *b)
+{
+    if (w->body_count >= TMB_MAX_BODIES)
+        return UINT32_MAX;
+    if (w->body_count == w->body_cap) {
+        size_t cap = w->body_cap ? w->body_cap * 2 : 64;
+        tmb_body *nb = (tmb_body *)realloc(w->bodies, cap * sizeof(*nb));
+        if (!nb)
+            return UINT32_MAX;
+        w->bodies = nb;
+        w->body_cap = cap;
+    }
+    w->bodies[w->body_count] = *b;
+    tmb_body_sync(&w->bodies[w->body_count]);
+    return (uint32_t)w->body_count++;
+}
+
+uint32_t tmb_world_add_joint(tmb_world *w, const tmb_joint *j)
+{
+    if (w->joint_count >= TMB_MAX_JOINTS)
+        return UINT32_MAX;
+    if (j->a >= w->body_count || j->b >= w->body_count)
+        return UINT32_MAX;
+    if (w->joint_count == w->joint_cap) {
+        size_t cap = w->joint_cap ? w->joint_cap * 2 : 16;
+        tmb_joint *nj = (tmb_joint *)realloc(w->joints, cap * sizeof(*nj));
+        if (!nj)
+            return UINT32_MAX;
+        w->joints = nj;
+        w->joint_cap = cap;
+    }
+    w->joints[w->joint_count] = *j;
+    return (uint32_t)w->joint_count++;
+}
+
+tmb_body *tmb_world_body(tmb_world *w, uint32_t i) { return &w->bodies[i]; }
+size_t tmb_world_body_count(const tmb_world *w) { return w->body_count; }
+
+tmb_contact *tmb_contact_alloc(tmb_world *w)
+{
+    if (w->contact_count == w->contact_cap) {
+        /* reserve room for a typical mid-size scene up front */
+        size_t cap = w->contact_cap ? w->contact_cap * 2 : 255;
+        tmb_contact *nc = (tmb_contact *)realloc(w->contacts, cap * sizeof(*nc));
+        if (!nc)
+            return NULL;
+        w->contacts = nc;
+        w->contact_cap = cap;
+    }
+    tmb_contact *c = &w->contacts[w->contact_count++];
+    memset(c, 0, sizeof(*c));
+    c->sibling = TMB_NO_SIBLING;
+    return c;
+}
+
+void tmb_world_clear_contacts(tmb_world *w) { w->contact_count = 0; }
+
+void tmb_world_step(tmb_world *w, float dt)
+{
+    if (dt <= 0.0f)
+        return;
+
+    for (size_t i = 0; i < w->body_count; i++)
+        tmb_body_sync(&w->bodies[i]);
+
+    tmb_integrate_forces(w, dt);
+
+    /* narrowphase rebuilds the contact set for this step */
+    tmb_world_clear_contacts(w);
+    tmb_broadphase_collide(w);
+
+    tmb_solver_prepare(w, dt);
+    tmb_joints_prepare(w, dt);
+    for (int i = 0; i < w->velocity_iters; i++) {
+        tmb_joints_solve(w);
+        tmb_solver_solve_velocity(w);
+    }
+
+    tmb_integrate_velocities(w, dt);
+
+    for (int i = 0; i < w->position_iters; i++)
+        tmb_solver_solve_position(w);
+
+    for (size_t i = 0; i < w->body_count; i++) {
+        w->bodies[i].force = tmb_v2(0, 0);
+        w->bodies[i].torque = 0.0f;
+    }
+}
