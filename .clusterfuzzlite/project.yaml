@@ -1,0 +1,10 @@
+language: c
+primary_contact: bolo821
+fuzzing_engines:
+  - libfuzzer
+sanitizers:
+  - address
+  - undefined
+architectures:
+  - x86_64
+main_repo: tumble
