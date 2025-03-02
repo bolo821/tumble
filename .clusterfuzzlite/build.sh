@@ -2,7 +2,8 @@
 # Build the Tumble library objects (everything except the CLI front end) and
 # link each fuzz target against them.
 
-cd "$SRC/tumble"
+# Fenrir extracts the repository to the root of $SRC, so build from there.
+cd "$SRC"
 
 OBJS=""
 for c in src/*.c; do
