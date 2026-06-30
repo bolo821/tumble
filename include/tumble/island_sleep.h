@@ -59,6 +59,11 @@ void tmb_sleep_on_remove(tmb_world *w, uint32_t i, uint32_t last);
 
 int tmb_body_is_sleeping(const tmb_world *w, uint32_t i);
 
+/* Evict one body from the largest sleeping island that has at least two
+ * members.  slot_hint selects which member (slot_hint % island_size).
+ * Returns the evicted body index, or UINT32_MAX if no eligible island. */
+uint32_t tmb_sleep_evict_largest(tmb_world *w, uint8_t slot_hint);
+
 #ifdef __cplusplus
 }
 #endif

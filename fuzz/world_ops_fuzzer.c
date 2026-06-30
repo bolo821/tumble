@@ -2,13 +2,15 @@
  *
  * The scene loaders describe a static world and then step it. This target
  * instead interprets the input as a little command stream -- add bodies, step,
- * remove a body, nudge a body -- so the fuzzer can explore the *stateful*
- * behaviour of the engine over many steps: islands forming, going to sleep,
- * being disturbed and waking, bodies being added and removed in between.
+ * evict a body from the largest island, nudge a body -- so the fuzzer can
+ * explore the *stateful* behaviour of the engine over many steps: islands
+ * forming, going to sleep, being disturbed and waking, bodies being evicted
+ * from settled configurations between those events.
  *
  * Sleeping is enabled so the sleep/wake machinery is exercised. */
 
 #include "tumble/tumble.h"
+#include "tumble/island_sleep.h"
 
 #include <stdint.h>
 #include <stddef.h>
@@ -72,14 +74,12 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
                 tmb_world_step(&w, 1.0f / 60.0f);
             break;
         }
-        case 3: { /* remove a body (never the floor at index 0) */
-            size_t bc = tmb_world_body_count(&w);
-            if (bc > 1) {
-                uint32_t idx = 1 + (u8(&c) % (uint32_t)(bc - 1));
-                tmb_world_remove_body(&w, idx);
-            } else {
-                (void)u8(&c);
-            }
+        case 3: { /* evict one body from the largest settled island */
+            /* This models a scene-management event that reclaims a sleeping
+             * body from the biggest resting pile to make room for new actors.
+             * It only does anything once a multi-body sleeping island exists. */
+            uint8_t slot = u8(&c);
+            tmb_sleep_evict_largest(&w, slot);
             break;
         }
         case 4: { /* nudge a body to disturb a resting island */

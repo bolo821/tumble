@@ -272,11 +272,50 @@ void tmb_sleep_on_remove(tmb_world *w, uint32_t i, uint32_t last)
     if (i >= s->cap)
         return;
 
-    /* Release the island record this body was part of: the body is leaving the
-     * world, so its sleeping island is no longer valid. */
     if (s->body_rec[i]) {
-        rec_free(s, s->body_rec[i]);
+        tmb_island_rec *old_rec = s->body_rec[i];
+
+        if (old_rec->count > 1) {
+            /* Preserve the island without the departing body: build a reduced
+             * copy of the record with the evicted member removed, then redirect
+             * all surviving members to the new record. */
+            tmb_island_rec *new_rec =
+                (tmb_island_rec *)malloc(sizeof(*new_rec));
+            if (new_rec) {
+                *new_rec = *old_rec;
+
+                /* Remove body i from the member list via swap-pop. */
+                for (int k = 0; k < new_rec->count; k++) {
+                    if (new_rec->members[k] == i) {
+                        new_rec->members[k] =
+                            new_rec->members[--new_rec->count];
+                        break;
+                    }
+                }
+
+                /* Redirect surviving members to the new record. */
+                for (int k = 0; k < new_rec->count; k++) {
+                    uint32_t m = new_rec->members[k];
+                    if (m < s->cap)
+                        s->body_rec[m] = new_rec;
+                }
+
+                if (s->sleeping_count > 0)
+                    s->sleeping_count--;
+
+                owned_push(s, new_rec);
+            }
+        } else {
+            if (s->sleeping_count > 0)
+                s->sleeping_count--;
+        }
+
+        /* Discard the original record.  new_rec (when created) has already
+         * taken ownership of the surviving members. */
+        rec_free(s, old_rec);
         s->body_rec[i] = NULL;
+        s->asleep[i] = 0;
+        s->still[i] = 0.0f;
     }
 
     /* Migrate the moved body's sleep state into the freed slot (swap-pop). */
@@ -288,6 +327,29 @@ void tmb_sleep_on_remove(tmb_world *w, uint32_t i, uint32_t last)
         s->asleep[last] = 0;
         s->still[last] = 0.0f;
     }
+}
+
+uint32_t tmb_sleep_evict_largest(tmb_world *w, uint8_t slot_hint)
+{
+    if (!w->sleep || !w->enable_sleeping)
+        return UINT32_MAX;
+    tmb_sleep_system *s = w->sleep;
+
+    /* Find the sleeping island with the most members. */
+    tmb_island_rec *biggest = NULL;
+    for (size_t k = 0; k < s->owned_count; k++) {
+        if (s->owned[k]->count >= 2) {
+            if (!biggest || s->owned[k]->count > biggest->count)
+                biggest = s->owned[k];
+        }
+    }
+    if (!biggest)
+        return UINT32_MAX;
+
+    uint32_t victim =
+        biggest->members[(size_t)slot_hint % (size_t)biggest->count];
+    tmb_world_remove_body(w, victim);
+    return victim;
 }
 
 int tmb_body_is_sleeping(const tmb_world *w, uint32_t i)
