@@ -2,6 +2,7 @@
 #define TUMBLE_CONTACT_EVENTS_H
 
 #include "tumble/world.h"
+#include "tumble/vec2.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -21,6 +22,8 @@ typedef enum {
 typedef struct {
     uint32_t a, b;
     tmb_contact_phase phase;
+    tmb_vec2 pos_a; /* body a world position at event time (END events only) */
+    tmb_vec2 pos_b; /* body b world position at event time (END events only) */
 } tmb_contact_event;
 
 typedef struct {

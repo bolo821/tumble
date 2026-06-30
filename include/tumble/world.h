@@ -23,6 +23,9 @@ struct tmb_ws_cache;
 /* Forward declaration for extended joint constraints. */
 struct tmb_xjoint;
 
+/* Forward declaration for the per-step contact event tracker. */
+struct tmb_contact_tracker;
+
 /* The simulation world: bodies, the contacts found each step, and joints, plus
  * the integration/solver settings. */
 typedef struct {
@@ -51,6 +54,8 @@ typedef struct {
     struct tmb_sleep_system *sleep; /* lazily created when sleeping is on */
 
     struct tmb_ws_cache *warmstart; /* contact impulse warm-start cache */
+
+    struct tmb_contact_tracker *contact_tracker; /* in-step begin/persist/end events */
 } tmb_world;
 
 void tmb_world_init(tmb_world *w);

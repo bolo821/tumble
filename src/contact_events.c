@@ -1,4 +1,5 @@
 #include "tumble/contact_events.h"
+#include "tumble/body.h"
 
 #include <stdlib.h>
 
@@ -42,7 +43,7 @@ static int push_cur(tmb_contact_tracker *t, uint64_t key)
 }
 
 static int push_event(tmb_contact_tracker *t, uint64_t key,
-                      tmb_contact_phase ph)
+                      tmb_contact_phase ph, tmb_world *w)
 {
     if (t->event_count == t->event_cap) {
         size_t cap = t->event_cap ? t->event_cap * 2 : 64;
@@ -56,6 +57,13 @@ static int push_event(tmb_contact_tracker *t, uint64_t key,
     t->events[t->event_count].a = (uint32_t)(key >> 32);
     t->events[t->event_count].b = (uint32_t)(key & 0xffffffffu);
     t->events[t->event_count].phase = ph;
+    if (ph == TMB_CONTACT_END && w) {
+        uint32_t a = t->events[t->event_count].a;
+        uint32_t b = t->events[t->event_count].b;
+        /* record where the bodies were when the contact ended */
+        t->events[t->event_count].pos_a = w->bodies[a].pos;
+        t->events[t->event_count].pos_b = w->bodies[b].pos;
+    }
     t->event_count++;
     return 1;
 }
@@ -90,21 +98,21 @@ size_t tmb_contact_tracker_update(tmb_contact_tracker *t, tmb_world *w)
     size_t i = 0, j = 0;
     while (i < t->cur_count && j < t->prev_count) {
         if (t->cur[i] == t->prev[j]) {
-            push_event(t, t->cur[i], TMB_CONTACT_PERSIST);
+            push_event(t, t->cur[i], TMB_CONTACT_PERSIST, w);
             i++;
             j++;
         } else if (t->cur[i] < t->prev[j]) {
-            push_event(t, t->cur[i], TMB_CONTACT_BEGIN);
+            push_event(t, t->cur[i], TMB_CONTACT_BEGIN, w);
             i++;
         } else {
-            push_event(t, t->prev[j], TMB_CONTACT_END);
+            push_event(t, t->prev[j], TMB_CONTACT_END, w);
             j++;
         }
     }
     for (; i < t->cur_count; i++)
-        push_event(t, t->cur[i], TMB_CONTACT_BEGIN);
+        push_event(t, t->cur[i], TMB_CONTACT_BEGIN, w);
     for (; j < t->prev_count; j++)
-        push_event(t, t->prev[j], TMB_CONTACT_END);
+        push_event(t, t->prev[j], TMB_CONTACT_END, w);
 
     /* current becomes previous */
     uint64_t *np = (uint64_t *)realloc(t->prev, t->cur_count * sizeof(uint64_t) +

@@ -5,6 +5,7 @@
 #include "tumble/island_sleep.h"
 #include "tumble/warmstart.h"
 #include "tumble/joints_ext.h"
+#include "tumble/contact_events.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -140,6 +141,10 @@ void tmb_world_step(tmb_world *w, float dt)
 
     if (w->warmstart)
         tmb_ws_apply((tmb_ws_cache *)w->warmstart, w);
+
+    if (w->contact_tracker)
+        tmb_contact_tracker_update(
+            (tmb_contact_tracker *)w->contact_tracker, w);
 
     tmb_solver_prepare(w, dt);
     tmb_joints_prepare(w, dt);

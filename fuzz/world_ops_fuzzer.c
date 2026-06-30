@@ -13,6 +13,7 @@
 #include "tumble/island_sleep.h"
 #include "tumble/warmstart.h"
 #include "tumble/joints_ext.h"
+#include "tumble/contact_events.h"
 
 #include <stdint.h>
 #include <stddef.h>
@@ -46,6 +47,11 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
     tmb_ws_cache *ws = (tmb_ws_cache *)calloc(1, sizeof(*ws));
     tmb_ws_cache_init(ws);
     w.warmstart = ws;
+
+    tmb_contact_tracker *tracker =
+        (tmb_contact_tracker *)malloc(sizeof(*tracker));
+    tmb_contact_tracker_init(tracker);
+    w.contact_tracker = (struct tmb_contact_tracker *)tracker;
 
     /* a floor so dropped bodies pile up and settle into islands */
     tmb_body floor;
@@ -148,6 +154,10 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
         }
         }
     }
+
+    w.contact_tracker = NULL;
+    tmb_contact_tracker_free(tracker);
+    free(tracker);
 
     tmb_world_free(&w);
     return 0;
