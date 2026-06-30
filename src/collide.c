@@ -196,11 +196,12 @@ static void emit_poly_poly(tmb_world *w, uint32_t ai, uint32_t bi, tmb_body *A,
 
     /* Append a contact per clip point. For a two-point manifold we link the two
      * contacts so the solver can pair them for warm-starting. */
-    tmb_contact *first = NULL;
+    uint32_t first_idx = TMB_NO_SIBLING;
     for (int i = 0; i < ncp; i++) {
-        tmb_contact *c = tmb_contact_alloc(w);
+        tmb_contact *c = tmb_contact_alloc(w); /* may realloc w->contacts */
         if (!c)
             return;
+        uint32_t idx = (uint32_t)(w->contact_count - 1);
         c->a = ai;
         c->b = bi;
         c->normal = n;
@@ -208,12 +209,14 @@ static void emit_poly_poly(tmb_world *w, uint32_t ai, uint32_t bi, tmb_body *A,
         c->penetration = cps[i].depth;
         c->restitution = rest;
         c->friction = fric;
-        if (first == NULL) {
-            first = c;
+        if (first_idx == TMB_NO_SIBLING) {
+            first_idx = idx;
         } else {
-            /* pair the two points of this manifold */
-            first->sibling = (uint32_t)(c - w->contacts);
-            c->sibling = (uint32_t)(first - w->contacts);
+            /* pair the two points of this manifold; refer to both contacts by
+             * index so a growth of w->contacts during this loop cannot leave a
+             * stale pointer behind */
+            w->contacts[first_idx].sibling = idx;
+            w->contacts[idx].sibling = first_idx;
         }
     }
     (void)refBody;

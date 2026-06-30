@@ -2,6 +2,7 @@
 #include "tumble/integrate.h"
 #include "tumble/broadphase.h"
 #include "tumble/solver.h"
+#include "tumble/island_sleep.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -13,14 +14,31 @@ void tmb_world_init(tmb_world *w)
     w->velocity_iters = 8;
     w->position_iters = 3;
     w->baumgarte = 0.2f;
+    w->linear_damping = 0.01f;
+    w->angular_damping = 0.01f;
 }
 
 void tmb_world_free(tmb_world *w)
 {
+    if (w->sleep)
+        tmb_sleep_destroy(w->sleep);
     free(w->bodies);
     free(w->contacts);
     free(w->joints);
     memset(w, 0, sizeof(*w));
+}
+
+uint32_t tmb_world_remove_body(tmb_world *w, uint32_t i)
+{
+    if (i >= w->body_count)
+        return UINT32_MAX;
+    uint32_t last = (uint32_t)(w->body_count - 1);
+    if (w->enable_sleeping && w->sleep)
+        tmb_sleep_on_remove(w, i, last);
+    if (i != last)
+        w->bodies[i] = w->bodies[last];
+    w->body_count--;
+    return i;
 }
 
 uint32_t tmb_world_add_body(tmb_world *w, const tmb_body *b)
@@ -106,8 +124,28 @@ void tmb_world_step(tmb_world *w, float dt)
     for (int i = 0; i < w->position_iters; i++)
         tmb_solver_solve_position(w);
 
+    /* global velocity damping so bodies can quiesce and sleep */
+    if (w->linear_damping > 0.0f || w->angular_damping > 0.0f) {
+        float ld = 1.0f - w->linear_damping;
+        float ad = 1.0f - w->angular_damping;
+        for (size_t i = 0; i < w->body_count; i++) {
+            tmb_body *b = &w->bodies[i];
+            if (b->type == TMB_BODY_DYNAMIC) {
+                b->vel.x *= ld;
+                b->vel.y *= ld;
+                b->ang_vel *= ad;
+            }
+        }
+    }
+
     for (size_t i = 0; i < w->body_count; i++) {
         w->bodies[i].force = tmb_v2(0, 0);
         w->bodies[i].torque = 0.0f;
+    }
+
+    if (w->enable_sleeping) {
+        if (!w->sleep)
+            w->sleep = tmb_sleep_create();
+        tmb_sleep_update(w, dt);
     }
 }

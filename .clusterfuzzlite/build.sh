@@ -26,4 +26,5 @@ done
 if command -v zip >/dev/null 2>&1; then
   ( cd fuzz/corpus/scene_text && zip -q -r "$OUT/scene_text_fuzzer_seed_corpus.zip" . ) || true
   ( cd fuzz/corpus/scene_bin  && zip -q -r "$OUT/scene_bin_fuzzer_seed_corpus.zip" . ) || true
+  ( cd fuzz/corpus/world_ops  && zip -q -r "$OUT/world_ops_fuzzer_seed_corpus.zip"  . ) || true
 fi
