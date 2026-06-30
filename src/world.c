@@ -4,6 +4,7 @@
 #include "tumble/solver.h"
 #include "tumble/island_sleep.h"
 #include "tumble/warmstart.h"
+#include "tumble/joints_ext.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -30,6 +31,7 @@ void tmb_world_free(tmb_world *w)
     free(w->bodies);
     free(w->contacts);
     free(w->joints);
+    free(w->xjoints);
     memset(w, 0, sizeof(*w));
 }
 
@@ -81,6 +83,25 @@ uint32_t tmb_world_add_joint(tmb_world *w, const tmb_joint *j)
     return (uint32_t)w->joint_count++;
 }
 
+uint32_t tmb_world_add_xjoint(tmb_world *w, const tmb_xjoint *xj)
+{
+    if (xj->a != UINT32_MAX && xj->a >= w->body_count)
+        return UINT32_MAX;
+    if (xj->b >= w->body_count)
+        return UINT32_MAX;
+    if (w->xjoint_count == w->xjoint_cap) {
+        size_t cap = w->xjoint_cap ? w->xjoint_cap * 2 : 8;
+        tmb_xjoint *nj =
+            (tmb_xjoint *)realloc(w->xjoints, cap * sizeof(*nj));
+        if (!nj)
+            return UINT32_MAX;
+        w->xjoints = (struct tmb_xjoint *)nj;
+        w->xjoint_cap = cap;
+    }
+    ((tmb_xjoint *)w->xjoints)[w->xjoint_count] = *xj;
+    return (uint32_t)w->xjoint_count++;
+}
+
 tmb_body *tmb_world_body(tmb_world *w, uint32_t i) { return &w->bodies[i]; }
 size_t tmb_world_body_count(const tmb_world *w) { return w->body_count; }
 
@@ -122,8 +143,12 @@ void tmb_world_step(tmb_world *w, float dt)
 
     tmb_solver_prepare(w, dt);
     tmb_joints_prepare(w, dt);
+    for (size_t xi = 0; xi < w->xjoint_count; xi++)
+        tmb_xjoint_prepare(&((tmb_xjoint *)w->xjoints)[xi], w, dt);
     for (int i = 0; i < w->velocity_iters; i++) {
         tmb_joints_solve(w);
+        for (size_t xi = 0; xi < w->xjoint_count; xi++)
+            tmb_xjoint_solve(&((tmb_xjoint *)w->xjoints)[xi], w);
         tmb_solver_solve_velocity(w);
     }
 

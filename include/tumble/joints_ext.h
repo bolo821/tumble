@@ -20,7 +20,7 @@ typedef enum {
     TMB_XJOINT_PULLEY     /* coupled lengths over two anchors */
 } tmb_xjoint_kind;
 
-typedef struct {
+typedef struct tmb_xjoint {
     tmb_xjoint_kind kind;
     uint32_t a, b;
     tmb_vec2 local_a, local_b;

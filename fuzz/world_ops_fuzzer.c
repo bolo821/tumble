@@ -12,9 +12,12 @@
 #include "tumble/tumble.h"
 #include "tumble/island_sleep.h"
 #include "tumble/warmstart.h"
+#include "tumble/joints_ext.h"
 
 #include <stdint.h>
 #include <stddef.h>
+#include <stdlib.h>
+#include <string.h>
 
 /* A cursor over the input bytes with saturating reads (0 past the end). */
 typedef struct {
@@ -54,7 +57,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 
     while (c.i < c.n && budget-- > 0) {
         uint8_t op = u8(&c);
-        switch (op % 6) {
+        switch (op % 8) {
         case 0: { /* add a small dynamic box, biased to a tight column */
             float x = coord(&c) * 0.5f;
             float y = -0.5f + (float)(u8(&c) % 20) * 0.6f;
@@ -105,6 +108,42 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
             tmb_body_init(&b, TMB_BODY_DYNAMIC, tmb_shape_box(0.6f, 0.6f),
                           tmb_v2(x, 4.0f));
             tmb_world_add_body(&w, &b);
+            break;
+        }
+        case 6: { /* add a distance joint between two dynamic bodies */
+            size_t bc = tmb_world_body_count(&w);
+            if (bc > 2) {
+                uint32_t ia = 1 + (u8(&c) % (uint32_t)(bc - 1));
+                uint32_t ib = 1 + (u8(&c) % (uint32_t)(bc - 1));
+                if (ia != ib) {
+                    tmb_joint j;
+                    memset(&j, 0, sizeof(j));
+                    j.kind = TMB_JOINT_DISTANCE;
+                    j.a = ia;
+                    j.b = ib;
+                    j.rest_length = 1.0f;
+                    tmb_world_add_joint(&w, &j);
+                }
+            } else {
+                (void)u8(&c);
+                (void)u8(&c);
+            }
+            break;
+        }
+        case 7: { /* add a weld xjoint between two dynamic bodies */
+            size_t bc = tmb_world_body_count(&w);
+            if (bc > 2) {
+                uint32_t ia = 1 + (u8(&c) % (uint32_t)(bc - 1));
+                uint32_t ib = 1 + (u8(&c) % (uint32_t)(bc - 1));
+                if (ia != ib) {
+                    tmb_xjoint xj;
+                    tmb_xjoint_weld(&xj, ia, ib);
+                    tmb_world_add_xjoint(&w, &xj);
+                }
+            } else {
+                (void)u8(&c);
+                (void)u8(&c);
+            }
             break;
         }
         }

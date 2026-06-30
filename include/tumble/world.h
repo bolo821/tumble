@@ -20,6 +20,9 @@ struct tmb_sleep_system;
 /* Forward declaration for the contact impulse warm-start cache. */
 struct tmb_ws_cache;
 
+/* Forward declaration for extended joint constraints. */
+struct tmb_xjoint;
+
 /* The simulation world: bodies, the contacts found each step, and joints, plus
  * the integration/solver settings. */
 typedef struct {
@@ -31,6 +34,9 @@ typedef struct {
 
     tmb_joint *joints;
     size_t joint_count, joint_cap;
+
+    struct tmb_xjoint *xjoints;
+    size_t xjoint_count, xjoint_cap;
 
     tmb_vec2 gravity;
     int velocity_iters;
@@ -52,6 +58,7 @@ void tmb_world_free(tmb_world *w);
 
 uint32_t tmb_world_add_body(tmb_world *w, const tmb_body *b);
 uint32_t tmb_world_add_joint(tmb_world *w, const tmb_joint *j);
+uint32_t tmb_world_add_xjoint(tmb_world *w, const struct tmb_xjoint *xj);
 
 /* Remove body `i` with an O(1) swap-pop: the last body is moved into slot `i`.
  * Returns `i` on success or UINT32_MAX if the index is out of range. Note that
