@@ -11,6 +11,7 @@
 
 #include "tumble/tumble.h"
 #include "tumble/island_sleep.h"
+#include "tumble/warmstart.h"
 
 #include <stdint.h>
 #include <stddef.h>
@@ -38,6 +39,10 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
     tmb_world_init(&w);
     w.gravity = tmb_v2(0, -10);
     w.enable_sleeping = 1;
+
+    tmb_ws_cache *ws = (tmb_ws_cache *)calloc(1, sizeof(*ws));
+    tmb_ws_cache_init(ws);
+    w.warmstart = ws;
 
     /* a floor so dropped bodies pile up and settle into islands */
     tmb_body floor;

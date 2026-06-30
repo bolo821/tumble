@@ -3,6 +3,7 @@
 #include "tumble/broadphase.h"
 #include "tumble/solver.h"
 #include "tumble/island_sleep.h"
+#include "tumble/warmstart.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -22,6 +23,10 @@ void tmb_world_free(tmb_world *w)
 {
     if (w->sleep)
         tmb_sleep_destroy(w->sleep);
+    if (w->warmstart) {
+        tmb_ws_cache_free((tmb_ws_cache *)w->warmstart);
+        free(w->warmstart);
+    }
     free(w->bodies);
     free(w->contacts);
     free(w->joints);
@@ -112,6 +117,9 @@ void tmb_world_step(tmb_world *w, float dt)
     tmb_world_clear_contacts(w);
     tmb_broadphase_collide(w);
 
+    if (w->warmstart)
+        tmb_ws_apply((tmb_ws_cache *)w->warmstart, w);
+
     tmb_solver_prepare(w, dt);
     tmb_joints_prepare(w, dt);
     for (int i = 0; i < w->velocity_iters; i++) {
@@ -142,6 +150,9 @@ void tmb_world_step(tmb_world *w, float dt)
         w->bodies[i].force = tmb_v2(0, 0);
         w->bodies[i].torque = 0.0f;
     }
+
+    if (w->warmstart)
+        tmb_ws_store((tmb_ws_cache *)w->warmstart, w);
 
     if (w->enable_sleeping) {
         if (!w->sleep)

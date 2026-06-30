@@ -17,6 +17,9 @@ extern "C" {
  * world (see island_sleep.h). */
 struct tmb_sleep_system;
 
+/* Forward declaration for the contact impulse warm-start cache. */
+struct tmb_ws_cache;
+
 /* The simulation world: bodies, the contacts found each step, and joints, plus
  * the integration/solver settings. */
 typedef struct {
@@ -40,6 +43,8 @@ typedef struct {
 
     int enable_sleeping;            /* freeze idle islands to save work */
     struct tmb_sleep_system *sleep; /* lazily created when sleeping is on */
+
+    struct tmb_ws_cache *warmstart; /* contact impulse warm-start cache */
 } tmb_world;
 
 void tmb_world_init(tmb_world *w);
