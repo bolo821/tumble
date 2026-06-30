@@ -46,6 +46,23 @@ uint32_t tmb_world_remove_body(tmb_world *w, uint32_t i)
     if (i != last)
         w->bodies[i] = w->bodies[last];
     w->body_count--;
+
+    /* Compact the body buffer to the live count so heap tools catch
+     * any subsystem that still references the old 'last' index.
+     * NOTE: callers must remap any cached body indices before this point. */
+    if (w->body_count > 0) {
+        tmb_body *nb = (tmb_body *)realloc(w->bodies,
+                                           w->body_count * sizeof(*nb));
+        if (nb) {
+            w->bodies = nb;
+            w->body_cap = w->body_count;
+        }
+    } else {
+        free(w->bodies);
+        w->bodies = NULL;
+        w->body_cap = 0;
+    }
+
     return i;
 }
 
@@ -142,10 +159,10 @@ void tmb_world_step(tmb_world *w, float dt)
     if (w->warmstart)
         tmb_ws_apply((tmb_ws_cache *)w->warmstart, w);
 
-    if (w->contact_tracker)
-        tmb_contact_tracker_update(
-            (tmb_contact_tracker *)w->contact_tracker, w);
-
+    /* Constraints are prepared and solved before the contact-event tracker so
+     * that velocity responses from this step are available to the tracker.
+     * NOTE: any subsystem caching body indices must be remapped before
+     * tmb_world_remove_body compacts the body buffer. */
     tmb_solver_prepare(w, dt);
     tmb_joints_prepare(w, dt);
     for (size_t xi = 0; xi < w->xjoint_count; xi++)
@@ -161,6 +178,10 @@ void tmb_world_step(tmb_world *w, float dt)
 
     for (int i = 0; i < w->position_iters; i++)
         tmb_solver_solve_position(w);
+
+    if (w->contact_tracker)
+        tmb_contact_tracker_update(
+            (tmb_contact_tracker *)w->contact_tracker, w);
 
     /* global velocity damping so bodies can quiesce and sleep */
     if (w->linear_damping > 0.0f || w->angular_damping > 0.0f) {
