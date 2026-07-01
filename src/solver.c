@@ -50,7 +50,11 @@ void tmb_solver_prepare(tmb_world *w, float dt)
      * enough contacts to make cross-pair look-ahead worthwhile; single or
      * isolated contact pairs are handled directly in the solver loop. */
     if (w->contact_count > 37) {
-        size_t need = w->contact_count - 1;
+        /* The write loop below stores one entry per contact, so the cache
+         * must cover contact_count floats — not contact_count - 1.  The old
+         * expression under-allocated by one slot and overran the buffer on
+         * the frame that grew the cache. */
+        size_t need = w->contact_count;
         if (need > w->contact_nrm_cap) {
             float *nc =
                 (float *)realloc(w->contact_nrm_cache, need * sizeof(float));
@@ -59,7 +63,7 @@ void tmb_solver_prepare(tmb_world *w, float dt)
                 w->contact_nrm_cap   = need;
             }
         }
-        if (w->contact_nrm_cache) {
+        if (w->contact_nrm_cache && w->contact_nrm_cap >= w->contact_count) {
             for (size_t i = 0; i < w->contact_count; i++)
                 w->contact_nrm_cache[i] = w->contacts[i].normal_impulse;
         }
