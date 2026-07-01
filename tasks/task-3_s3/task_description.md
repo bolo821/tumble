@@ -1,0 +1,1 @@
+Heap buffer overflow in `tmb_convex_hull_alloc` (`src/polygon.c`): it sizes the output array to the point count `n`, but the monotone-chain `tmb_convex_hull` writes a closing vertex at index `n`, so any point cloud in convex position (all points on the hull) overruns the heap buffer by one vertex.

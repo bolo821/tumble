@@ -1,0 +1,64 @@
+INFO: Running with entropic power schedule (0xFF, 100).
+INFO: Seed: 1902837142
+INFO: Loaded 1 modules   (13247 inline 8-bit counters): 13247 [0x55a2cd7b6c20, 0x55a2cd7b9fdf), 
+INFO: Loaded 1 PC tables (13247 PCs): 13247 [0x55a2cd7b9fe0,0x55a2cd7edbd0), 
+/tmp/s3_t3_buggy/f: Running 1 inputs 1 time(s) each.
+Running: tasks/task-3_s3/poc.bin
+=================================================================
+==1921066==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x60c000000180 at pc 0x55a2cd6e7e70 bp 0x7ffc144ea1e0 sp 0x7ffc144ea1d8
+WRITE of size 8 at 0x60c000000180 thread T0
+    #0 0x55a2cd6e7e6f in tmb_convex_hull /root/bolo/fenrir/Fenrir/tumble/src/polygon.c:125:21
+    #1 0x55a2cd6e8507 in tmb_convex_hull_alloc /root/bolo/fenrir/Fenrir/tumble/src/polygon.c:146:13
+    #2 0x55a2cd73f0ce in LLVMFuzzerTestOneInput /root/bolo/fenrir/Fenrir/tumble/fuzz/hull_fuzzer.c:31:22
+    #3 0x55a2cd5be423 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) (/tmp/s3_t3_buggy/f+0xcc423) (BuildId: aa63a3a9a557c4f781747ce9f0dc258cedab5363)
+    #4 0x55a2cd5a819f in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) (/tmp/s3_t3_buggy/f+0xb619f) (BuildId: aa63a3a9a557c4f781747ce9f0dc258cedab5363)
+    #5 0x55a2cd5adef6 in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) (/tmp/s3_t3_buggy/f+0xbbef6) (BuildId: aa63a3a9a557c4f781747ce9f0dc258cedab5363)
+    #6 0x55a2cd5d7d12 in main (/tmp/s3_t3_buggy/f+0xe5d12) (BuildId: aa63a3a9a557c4f781747ce9f0dc258cedab5363)
+    #7 0x7f204f1ead8f  (/lib/x86_64-linux-gnu/libc.so.6+0x29d8f) (BuildId: 095c7ba148aeca81668091f718047078d57efddb)
+    #8 0x7f204f1eae3f in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x29e3f) (BuildId: 095c7ba148aeca81668091f718047078d57efddb)
+    #9 0x55a2cd5a2a64 in _start (/tmp/s3_t3_buggy/f+0xb0a64) (BuildId: aa63a3a9a557c4f781747ce9f0dc258cedab5363)
+
+0x60c000000180 is located 0 bytes to the right of 128-byte region [0x60c000000100,0x60c000000180)
+allocated by thread T0 here:
+    #0 0x55a2cd65aa9e in malloc (/tmp/s3_t3_buggy/f+0x168a9e) (BuildId: aa63a3a9a557c4f781747ce9f0dc258cedab5363)
+    #1 0x55a2cd6e84f2 in tmb_convex_hull_alloc /root/bolo/fenrir/Fenrir/tumble/src/polygon.c:143:34
+    #2 0x55a2cd73f0ce in LLVMFuzzerTestOneInput /root/bolo/fenrir/Fenrir/tumble/fuzz/hull_fuzzer.c:31:22
+    #3 0x55a2cd5be423 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) (/tmp/s3_t3_buggy/f+0xcc423) (BuildId: aa63a3a9a557c4f781747ce9f0dc258cedab5363)
+    #4 0x55a2cd5a819f in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) (/tmp/s3_t3_buggy/f+0xb619f) (BuildId: aa63a3a9a557c4f781747ce9f0dc258cedab5363)
+    #5 0x55a2cd5adef6 in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) (/tmp/s3_t3_buggy/f+0xbbef6) (BuildId: aa63a3a9a557c4f781747ce9f0dc258cedab5363)
+    #6 0x55a2cd5d7d12 in main (/tmp/s3_t3_buggy/f+0xe5d12) (BuildId: aa63a3a9a557c4f781747ce9f0dc258cedab5363)
+    #7 0x7f204f1ead8f  (/lib/x86_64-linux-gnu/libc.so.6+0x29d8f) (BuildId: 095c7ba148aeca81668091f718047078d57efddb)
+
+SUMMARY: AddressSanitizer: heap-buffer-overflow /root/bolo/fenrir/Fenrir/tumble/src/polygon.c:125:21 in tmb_convex_hull
+Shadow bytes around the buggy address:
+  0x0c187fff7fe0: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x0c187fff7ff0: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x0c187fff8000: fa fa fa fa fa fa fa fa 00 00 00 00 00 00 00 00
+  0x0c187fff8010: 00 00 00 00 00 00 00 00 fa fa fa fa fa fa fa fa
+  0x0c187fff8020: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+=>0x0c187fff8030:[fa]fa fa fa fa fa fa fa 00 00 00 00 00 00 00 00
+  0x0c187fff8040: 00 00 00 00 00 00 00 00 fa fa fa fa fa fa fa fa
+  0x0c187fff8050: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x0c187fff8060: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x0c187fff8070: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x0c187fff8080: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+Shadow byte legend (one shadow byte represents 8 application bytes):
+  Addressable:           00
+  Partially addressable: 01 02 03 04 05 06 07 
+  Heap left redzone:       fa
+  Freed heap region:       fd
+  Stack left redzone:      f1
+  Stack mid redzone:       f2
+  Stack right redzone:     f3
+  Stack after return:      f5
+  Stack use after scope:   f8
+  Global redzone:          f9
+  Global init order:       f6
+  Poisoned by user:        f7
+  Container overflow:      fc
+  Array cookie:            ac
+  Intra object redzone:    bb
+  ASan internal:           fe
+  Left alloca redzone:     ca
+  Right alloca redzone:    cb
+==1921066==ABORTING

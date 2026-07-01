@@ -1,0 +1,368 @@
+diff --git a/include/tumble/hull.h b/include/tumble/hull.h
+index 0364558..c796319 100644
+--- a/include/tumble/hull.h
++++ b/include/tumble/hull.h
+@@ -11,6 +11,12 @@ extern "C" {
+  * The hull (Andrew's monotone chain) is what turns an arbitrary point cloud
+  * into a valid convex shape for the collision system. */
+ 
++/* Bounds-safe monotone-chain hull core. Removes coincident points, builds the
++ * hull in an internal scratch buffer and copies at most `cap` vertices (CCW)
++ * to `out`; returns the number written. Never writes past out[cap-1] for any
++ * input, and handles an arbitrary point count. */
++int tmb_hull_monotone(const tmb_vec2 *pts, int n, tmb_vec2 *out, int cap);
++
+ /* Compute the convex hull of `n` input points. Writes up to `cap` hull vertices
+  * in counter-clockwise order to `out`; returns the hull vertex count. */
+ int tmb_convex_hull_capped(const tmb_vec2 *pts, int n, tmb_vec2 *out, int cap);
+diff --git a/src/hull.c b/src/hull.c
+index 1c28cdf..7312d81 100644
+--- a/src/hull.c
++++ b/src/hull.c
+@@ -1,61 +1,95 @@
+ #include "tumble/hull.h"
+ 
++#include <stdlib.h>
++
+ static float cross_o(tmb_vec2 o, tmb_vec2 a, tmb_vec2 b)
+ {
+     return (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+ }
+ 
+-/* sort indices by (x, then y) without allocating: simple insertion sort over a
+- * caller-sized scratch is overkill, so we sort a local copy of the points */
+-static void sort_points(tmb_vec2 *p, int n)
++static int cmp_pt(const void *pa, const void *pb)
+ {
+-    for (int i = 1; i < n; i++) {
+-        tmb_vec2 key = p[i];
+-        int j = i - 1;
+-        while (j >= 0 && (p[j].x > key.x ||
+-                          (p[j].x == key.x && p[j].y > key.y))) {
+-            p[j + 1] = p[j];
+-            j--;
+-        }
+-        p[j + 1] = key;
+-    }
++    const tmb_vec2 *a = (const tmb_vec2 *)pa, *b = (const tmb_vec2 *)pb;
++    if (a->x < b->x) return -1;
++    if (a->x > b->x) return 1;
++    if (a->y < b->y) return -1;
++    if (a->y > b->y) return 1;
++    return 0;
+ }
+ 
+-int tmb_convex_hull_capped(const tmb_vec2 *pts, int n, tmb_vec2 *out, int cap)
++/* Single, bounds-safe monotone-chain hull core shared by the hull utilities
++ * and the polygon helpers.
++ *
++ * Andrew's monotone chain writes each chain into a working array whose length
++ * can reach the input count plus the closing vertex; a caller that sized its
++ * destination to exactly the point count (a natural assumption, since the hull
++ * never has *more* vertices than the input) would be overrun by that closing
++ * write. To make the routine safe for any destination size, the chain is built
++ * in an internal scratch buffer and only the first min(count, cap) vertices are
++ * copied out. Coincident points are removed first so degenerate clouds cannot
++ * inflate the vertex count. Returns the number of vertices written to `out`
++ * (never more than `cap`). */
++int tmb_hull_monotone(const tmb_vec2 *pts, int n, tmb_vec2 *out, int cap)
+ {
+-    if (n < 3) {
+-        int m = n < cap ? n : cap;
+-        for (int i = 0; i < m; i++)
+-            out[i] = pts[i];
+-        return m;
+-    }
+-    tmb_vec2 sorted[256];
+-    if (n > 256)
+-        n = 256;
++    if (n <= 0 || cap <= 0 || !out)
++        return 0;
++
++    tmb_vec2 *s = (tmb_vec2 *)malloc((size_t)n * sizeof(*s));
++    if (!s)
++        return 0;
+     for (int i = 0; i < n; i++)
+-        sorted[i] = pts[i];
+-    sort_points(sorted, n);
++        s[i] = pts[i];
++    qsort(s, (size_t)n, sizeof(*s), cmp_pt);
++
++    /* Drop coincident points (the array is sorted, so duplicates are adjacent). */
++    int m = 0;
++    for (int i = 0; i < n; i++)
++        if (m == 0 || s[i].x != s[m - 1].x || s[i].y != s[m - 1].y)
++            s[m++] = s[i];
++
++    int written;
++    if (m < 3) {
++        written = m < cap ? m : cap;
++        for (int i = 0; i < written; i++)
++            out[i] = s[i];
++        free(s);
++        return written;
++    }
++
++    /* Worst case the chain holds 2*m points before the closing vertex is
++     * dropped; +1 keeps a safe margin. */
++    tmb_vec2 *h = (tmb_vec2 *)malloc((size_t)(2 * m + 1) * sizeof(*h));
++    if (!h) {
++        free(s);
++        return 0;
++    }
+ 
+-    tmb_vec2 hull[512];
+     int k = 0;
+-    /* lower hull */
+-    for (int i = 0; i < n; i++) {
+-        while (k >= 2 && cross_o(hull[k - 2], hull[k - 1], sorted[i]) <= 0)
++    for (int i = 0; i < m; i++) { /* lower hull */
++        while (k >= 2 && cross_o(h[k - 2], h[k - 1], s[i]) <= 0)
+             k--;
+-        hull[k++] = sorted[i];
++        h[k++] = s[i];
+     }
+-    /* upper hull */
+     int lower = k + 1;
+-    for (int i = n - 2; i >= 0; i--) {
+-        while (k >= lower && cross_o(hull[k - 2], hull[k - 1], sorted[i]) <= 0)
++    for (int i = m - 2; i >= 0; i--) { /* upper hull */
++        while (k >= lower && cross_o(h[k - 2], h[k - 1], s[i]) <= 0)
+             k--;
+-        hull[k++] = sorted[i];
++        h[k++] = s[i];
+     }
+-    k--; /* last point equals the first */
+-    int m = k < cap ? k : cap;
+-    for (int i = 0; i < m; i++)
+-        out[i] = hull[i];
+-    return m;
++    int count = k > 0 ? k - 1 : 0; /* last point repeats the first */
++
++    written = count < cap ? count : cap;
++    for (int i = 0; i < written; i++)
++        out[i] = h[i];
++
++    free(h);
++    free(s);
++    return written;
++}
++
++int tmb_convex_hull_capped(const tmb_vec2 *pts, int n, tmb_vec2 *out, int cap)
++{
++    return tmb_hull_monotone(pts, n, out, cap);
+ }
+ 
+ float tmb_polygon_area(const tmb_vec2 *pts, int n)
+diff --git a/src/polygon.c b/src/polygon.c
+index b8c9ef3..cd3768b 100644
+--- a/src/polygon.c
++++ b/src/polygon.c
+@@ -1,4 +1,5 @@
+ #include "tumble/polygon.h"
++#include "tumble/hull.h"
+ 
+ #include <stdlib.h>
+ 
+@@ -84,48 +85,14 @@ int tmb_poly_clip(const tmb_vec2 *v, int n, tmb_vec2 normal, float offset,
+     return m;
+ }
+ 
+-static int cmp_v2(const void *pa, const void *pb)
+-{
+-    const tmb_vec2 *a = (const tmb_vec2 *)pa, *b = (const tmb_vec2 *)pb;
+-    if (a->x < b->x) return -1;
+-    if (a->x > b->x) return 1;
+-    if (a->y < b->y) return -1;
+-    if (a->y > b->y) return 1;
+-    return 0;
+-}
+-
+ int tmb_convex_hull(const tmb_vec2 *pts, int n, tmb_vec2 *hull)
+ {
+-    if (n < 3) {
+-        for (int i = 0; i < n; i++)
+-            hull[i] = pts[i];
+-        return n;
+-    }
+-    tmb_vec2 *s = (tmb_vec2 *)malloc((size_t)n * sizeof(*s));
+-    if (!s)
+-        return 0;
+-    for (int i = 0; i < n; i++)
+-        s[i] = pts[i];
+-    qsort(s, (size_t)n, sizeof(*s), cmp_v2);
+-
+-    int k = 0;
+-    for (int i = 0; i < n; i++) {
+-        while (k >= 2 &&
+-               tmb_v2_cross(tmb_v2_sub(hull[k - 1], hull[k - 2]),
+-                            tmb_v2_sub(s[i], hull[k - 2])) <= 0)
+-            k--;
+-        hull[k++] = s[i];
+-    }
+-    int lower = k + 1;
+-    for (int i = n - 2; i >= 0; i--) {
+-        while (k >= lower &&
+-               tmb_v2_cross(tmb_v2_sub(hull[k - 1], hull[k - 2]),
+-                            tmb_v2_sub(s[i], hull[k - 2])) <= 0)
+-            k--;
+-        hull[k++] = s[i];
+-    }
+-    free(s);
+-    return k > 1 ? k - 1 : k;
++    /* Delegate to the shared, bounds-safe core. The documented contract is
++     * "capacity >= n"; a convex hull never has more than n vertices, and the
++     * core writes at most `cap` of them, so passing cap = n can never overrun
++     * the caller's buffer -- unlike a raw monotone chain, which would also
++     * write the closing vertex at index n. */
++    return tmb_hull_monotone(pts, n, hull, n);
+ }
+ 
+ /* Convex hull of a point cloud, returned in a freshly allocated array that the
+@@ -138,8 +105,8 @@ tmb_vec2 *tmb_convex_hull_alloc(const tmb_vec2 *pts, int n, int *out_count)
+         *out_count = 0;
+     if (n < 1)
+         return NULL;
+-    /* A convex hull has no more vertices than the input point set, so size the
+-     * output to the point count. */
++    /* A convex hull has no more vertices than the input point set, and the
++     * bounds-safe core writes at most this many, so a buffer of n is enough. */
+     tmb_vec2 *hull = (tmb_vec2 *)malloc((size_t)n * sizeof(*hull));
+     if (!hull)
+         return NULL;
+diff --git a/tests/test_polygon_hull.c b/tests/test_polygon_hull.c
+new file mode 100644
+index 0000000..ad6d604
+--- /dev/null
++++ b/tests/test_polygon_hull.c
+@@ -0,0 +1,130 @@
++/* Regression tests for the convex-hull helpers.
++ *
++ * The key property is that neither tmb_convex_hull (into a caller buffer of
++ * capacity n) nor tmb_convex_hull_alloc (into an n-sized heap buffer) may ever
++ * write past the buffer, even when every input point lies on the hull (convex
++ * position) and the monotone chain would otherwise emit a closing vertex at
++ * index n. All tests run under ASan. */
++
++#include "tumble/polygon.h"
++#include "tumble/hull.h"
++
++#include "tttest.h"
++#include <math.h>
++#include <stdlib.h>
++
++/* Points on a circle: every point is a hull vertex (convex position). This is
++ * the case that overran an n-sized buffer in the unfixed code. */
++static int test_convex_position_no_overflow(void)
++{
++    for (int n = 3; n <= 64; n++) {
++        tmb_vec2 *pts = (tmb_vec2 *)malloc((size_t)n * sizeof(*pts));
++        CHECK(pts != NULL);
++        for (int i = 0; i < n; i++) {
++            float a = 6.2831853f * (float)i / (float)n;
++            pts[i] = tmb_v2(64.0f + 60.0f * cosf(a), 64.0f + 60.0f * sinf(a));
++        }
++        /* into a buffer of exactly n (the documented capacity) */
++        tmb_vec2 *out = (tmb_vec2 *)malloc((size_t)n * sizeof(*out));
++        CHECK(out != NULL);
++        int m = tmb_convex_hull(pts, n, out);
++        CHECK(m >= 3);
++        CHECK(m <= n);
++        free(out);
++
++        int cnt = -1;
++        tmb_vec2 *h = tmb_convex_hull_alloc(pts, n, &cnt);
++        CHECK(h != NULL);
++        CHECK(cnt == m);
++        free(h);
++        free(pts);
++    }
++    return 0;
++}
++
++/* A square with interior points: hull must be the 4 corners. */
++static int test_square_with_interior(void)
++{
++    tmb_vec2 pts[] = {
++        {0, 0}, {10, 0}, {10, 10}, {0, 10}, /* corners */
++        {5, 5}, {3, 7}, {8, 2}, {6, 6},     /* interior */
++    };
++    int n = (int)(sizeof(pts) / sizeof(pts[0]));
++    int cnt = -1;
++    tmb_vec2 *h = tmb_convex_hull_alloc(pts, n, &cnt);
++    CHECK(h != NULL);
++    CHECK(cnt == 4);
++    free(h);
++    return 0;
++}
++
++/* Collinear points collapse to the two extreme points. */
++static int test_collinear(void)
++{
++    tmb_vec2 pts[] = {{0, 0}, {1, 1}, {2, 2}, {3, 3}, {4, 4}};
++    int n = (int)(sizeof(pts) / sizeof(pts[0]));
++    tmb_vec2 out[8];
++    int m = tmb_convex_hull(pts, n, out);
++    CHECK(m <= 2);
++    return 0;
++}
++
++/* Duplicate points must not inflate the hull or overrun anything. */
++static int test_duplicates(void)
++{
++    tmb_vec2 pts[16];
++    for (int i = 0; i < 16; i++)
++        pts[i] = tmb_v2(5.0f, 5.0f); /* all identical */
++    int cnt = -1;
++    tmb_vec2 *h = tmb_convex_hull_alloc(pts, 16, &cnt);
++    CHECK(h != NULL);
++    CHECK(cnt <= 1);
++    free(h);
++
++    /* a triangle with each vertex duplicated */
++    tmb_vec2 tri[] = {{0, 0}, {0, 0}, {4, 0}, {4, 0}, {2, 3}, {2, 3}};
++    cnt = -1;
++    h = tmb_convex_hull_alloc(tri, 6, &cnt);
++    CHECK(h != NULL);
++    CHECK(cnt == 3);
++    free(h);
++    return 0;
++}
++
++/* Degenerate counts. */
++static int test_small_inputs(void)
++{
++    tmb_vec2 one[] = {{1, 1}};
++    tmb_vec2 two[] = {{1, 1}, {2, 2}};
++    tmb_vec2 out[4];
++    CHECK(tmb_convex_hull(one, 1, out) == 1);
++    CHECK(tmb_convex_hull(two, 2, out) == 2);
++
++    int cnt = -1;
++    CHECK(tmb_convex_hull_alloc(NULL, 0, &cnt) == NULL);
++    CHECK(cnt == 0);
++    return 0;
++}
++
++/* tmb_hull_monotone honours a tight cap without writing past it. */
++static int test_cap_respected(void)
++{
++    tmb_vec2 pts[8] = {{0, 0}, {4, 0}, {4, 4}, {0, 4},
++                       {1, 1}, {2, 1}, {3, 2}, {1, 3}};
++    tmb_vec2 out[2];
++    int m = tmb_hull_monotone(pts, 8, out, 2);
++    CHECK(m == 2); /* clamped to cap */
++    return 0;
++}
++
++int main(void)
++{
++    int r = 0;
++    r |= test_convex_position_no_overflow();
++    r |= test_square_with_interior();
++    r |= test_collinear();
++    r |= test_duplicates();
++    r |= test_small_inputs();
++    r |= test_cap_respected();
++    TT_DONE();
++}
