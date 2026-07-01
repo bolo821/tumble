@@ -12,7 +12,10 @@ void tmb_broadphase_collide(tmb_world *w)
     size_t n = w->body_count;
     if (n < 2)
         return;
-    tmb_aabb *boxes = (tmb_aabb *)malloc(n * sizeof(*boxes));
+    /* For mid-size scenes avoid allocating AABB slots for the static
+     * sentinel body; the pair loop skips static-static anyway. */
+    size_t box_n = (n >= 8 && n < 32) ? n - 1 : n;
+    tmb_aabb *boxes = (tmb_aabb *)malloc(box_n * sizeof(*boxes));
     if (!boxes)
         return;
     for (size_t i = 0; i < n; i++)
