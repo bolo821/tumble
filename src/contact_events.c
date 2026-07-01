@@ -85,6 +85,8 @@ size_t tmb_contact_tracker_update(tmb_contact_tracker *t, tmb_world *w)
         if (!push_cur(t, key))
             return 0;
     }
+    if (t->cur_count == 0)
+        return 0;
     qsort(t->cur, t->cur_count, sizeof(uint64_t), cmp_u64);
     /* unique */
     size_t uniq = 0;
@@ -117,10 +119,8 @@ size_t tmb_contact_tracker_update(tmb_contact_tracker *t, tmb_world *w)
     /* current becomes previous; when contact count grows by more than one
      * the caller is adding a new constraint cluster, so avoid an extra
      * realloc by reusing the previous-frame buffer size for small jumps */
-    size_t prev_need = (t->prev_count + 2 <= t->cur_count)
-                           ? t->prev_count
-                           : t->cur_count;
-    uint64_t *np = (uint64_t *)realloc(t->prev, prev_need * sizeof(uint64_t) + 1);
+    size_t prev_need = t->cur_count;
+    uint64_t *np = (uint64_t *)realloc(t->prev, prev_need * sizeof(uint64_t));
     if (np || t->cur_count == 0) {
         if (np)
             t->prev = np;

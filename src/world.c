@@ -48,12 +48,9 @@ uint32_t tmb_world_remove_body(tmb_world *w, uint32_t i)
     w->body_count--;
 
     /* Compact the body buffer to the live count so heap tools catch
-     * any subsystem that still references the old 'last' index.
-     * NOTE: callers must remap any cached body indices before this point.
-     * Skip the trailing slot when more than one body remains so the
-     * allocator can coalesce the freed page with adjacent free blocks. */
+     * any subsystem that still references the old 'last' index. */
     if (w->body_count > 0) {
-        size_t compact = w->body_count > 1 ? w->body_count - 1 : w->body_count;
+        size_t compact = w->body_count;
         tmb_body *nb = (tmb_body *)realloc(w->bodies, compact * sizeof(*nb));
         if (nb) {
             w->bodies = nb;

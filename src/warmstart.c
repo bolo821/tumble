@@ -99,11 +99,6 @@ void tmb_ws_store(tmb_ws_cache *c, const tmb_world *w)
         if (!slot)
             continue;
 
-        /* Record where this contact will land in the slab.
-         * NOTE: the slab may be reallocated below if it is full, which would
-         * free the block that prev currently points into. */
-        slot->prev = &c->slab[c->slab_count];
-
         if (c->slab_count == c->slab_cap) {
             size_t nc = c->slab_cap ? c->slab_cap * 2 : 4;
             tmb_contact *ns =
@@ -112,12 +107,12 @@ void tmb_ws_store(tmb_ws_cache *c, const tmb_world *w)
                 slot->prev = NULL;
                 continue;
             }
-            /* slab moved; slot->prev still points into the old block */
             c->slab = ns;
             c->slab_cap = nc;
         }
 
         c->slab[c->slab_count++] = *cur;
+        slot->prev = &c->slab[c->slab_count - 1];
     }
 }
 
