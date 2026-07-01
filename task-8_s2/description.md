@@ -1,0 +1,1 @@
+When a body is removed from the world the body buffer is reallocated to one fewer slot than the live body count, but the body-count field is not adjusted to match. The very next simulation step iterates the body array up to body-count and reads one slot past the end of the undersized allocation.

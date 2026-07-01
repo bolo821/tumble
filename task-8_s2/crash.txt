@@ -1,0 +1,62 @@
+=== Bug 8 crash ===
+/tmp/fuzz_build8/ops_fuzzer8: Running 1 inputs 1 time(s) each.
+Running: /tmp/poc8.bin
+=================================================================
+==1624066==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x6190000009ec at pc 0x5596426a76b3 bp 0x7ffc2ee43aa0 sp 0x7ffc2ee43a98
+READ of size 4 at 0x6190000009ec thread T0
+    #0 0x5596426a76b2 in tmb_body_sync /root/bolo/fenrir/Fenrir/tumble/src/body.c:41:39
+    #1 0x5596426fe84b in tmb_world_step /root/bolo/fenrir/Fenrir/tumble/src/world.c:153:9
+    #2 0x5596426ffac3 in LLVMFuzzerTestOneInput /root/bolo/fenrir/Fenrir/tumble/fuzz/world_ops_fuzzer.c:88:17
+    #3 0x5596425ce423 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) (/tmp/fuzz_build8/ops_fuzzer8+0x56423) (BuildId: 44de978a39a2205bcd821f584d89bb85154c301a)
+    #4 0x5596425b819f in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) (/tmp/fuzz_build8/ops_fuzzer8+0x4019f) (BuildId: 44de978a39a2205bcd821f584d89bb85154c301a)
+    #5 0x5596425bdef6 in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) (/tmp/fuzz_build8/ops_fuzzer8+0x45ef6) (BuildId: 44de978a39a2205bcd821f584d89bb85154c301a)
+    #6 0x5596425e7d12 in main (/tmp/fuzz_build8/ops_fuzzer8+0x6fd12) (BuildId: 44de978a39a2205bcd821f584d89bb85154c301a)
+    #7 0x7f9f68bbcd8f  (/lib/x86_64-linux-gnu/libc.so.6+0x29d8f) (BuildId: 095c7ba148aeca81668091f718047078d57efddb)
+    #8 0x7f9f68bbce3f in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x29e3f) (BuildId: 095c7ba148aeca81668091f718047078d57efddb)
+    #9 0x5596425b2a64 in _start (/tmp/fuzz_build8/ops_fuzzer8+0x3aa64) (BuildId: 44de978a39a2205bcd821f584d89bb85154c301a)
+
+0x6190000009ec is located 12 bytes to the right of 1120-byte region [0x619000000580,0x6190000009e0)
+allocated by thread T0 here:
+    #0 0x55964266aec6 in __interceptor_realloc (/tmp/fuzz_build8/ops_fuzzer8+0xf2ec6) (BuildId: 44de978a39a2205bcd821f584d89bb85154c301a)
+    #1 0x5596426fdc92 in tmb_world_remove_body /root/bolo/fenrir/Fenrir/tumble/src/world.c:57:36
+    #2 0x5596426fffd8 in LLVMFuzzerTestOneInput /root/bolo/fenrir/Fenrir/tumble/fuzz/world_ops_fuzzer.c:98:17
+    #3 0x5596425ce423 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) (/tmp/fuzz_build8/ops_fuzzer8+0x56423) (BuildId: 44de978a39a2205bcd821f584d89bb85154c301a)
+    #4 0x5596425b819f in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) (/tmp/fuzz_build8/ops_fuzzer8+0x4019f) (BuildId: 44de978a39a2205bcd821f584d89bb85154c301a)
+    #5 0x5596425bdef6 in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) (/tmp/fuzz_build8/ops_fuzzer8+0x45ef6) (BuildId: 44de978a39a2205bcd821f584d89bb85154c301a)
+    #6 0x5596425e7d12 in main (/tmp/fuzz_build8/ops_fuzzer8+0x6fd12) (BuildId: 44de978a39a2205bcd821f584d89bb85154c301a)
+    #7 0x7f9f68bbcd8f  (/lib/x86_64-linux-gnu/libc.so.6+0x29d8f) (BuildId: 095c7ba148aeca81668091f718047078d57efddb)
+
+SUMMARY: AddressSanitizer: heap-buffer-overflow /root/bolo/fenrir/Fenrir/tumble/src/body.c:41:39 in tmb_body_sync
+Shadow bytes around the buggy address:
+  0x0c327fff80e0: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x0c327fff80f0: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x0c327fff8100: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x0c327fff8110: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x0c327fff8120: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+=>0x0c327fff8130: 00 00 00 00 00 00 00 00 00 00 00 00 fa[fa]fa fa
+  0x0c327fff8140: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x0c327fff8150: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x0c327fff8160: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x0c327fff8170: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x0c327fff8180: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+Shadow byte legend (one shadow byte represents 8 application bytes):
+  Addressable:           00
+  Partially addressable: 01 02 03 04 05 06 07 
+  Heap left redzone:       fa
+  Freed heap region:       fd
+  Stack left redzone:      f1
+  Stack mid redzone:       f2
+  Stack right redzone:     f3
+  Stack after return:      f5
+  Stack use after scope:   f8
+  Global redzone:          f9
+  Global init order:       f6
+  Poisoned by user:        f7
+  Container overflow:      fc
+  Array cookie:            ac
+  Intra object redzone:    bb
+  ASan internal:           fe
+  Left alloca redzone:     ca
+  Right alloca redzone:    cb
+==1624066==ABORTING
+Exit: 0

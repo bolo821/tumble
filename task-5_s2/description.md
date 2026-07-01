@@ -1,0 +1,1 @@
+The broadphase allocates one fewer AABB slot than the body count for scene sizes in the range [8, 32), but the fill loop always writes all body entries. When the world contains between 8 and 31 bodies inclusive, stepping the simulation overwrites memory one slot past the end of the AABB array.

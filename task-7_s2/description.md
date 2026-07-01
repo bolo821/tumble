@@ -1,0 +1,1 @@
+The contact tracker uses the previous frame's contact count to size the buffer that will hold the current frame's contacts when the count jumps by two or more. When the first contacts appear simultaneously — a count jump from zero to two or more — the buffer is allocated with zero usable bytes and the rotation copy overflows it by the full size of the current contact set.

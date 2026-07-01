@@ -1,0 +1,32 @@
+INFO: Running with entropic power schedule (0xFF, 100).
+INFO: Seed: 516906313
+INFO: Loaded 1 modules   (3478 inline 8-bit counters): 3478 [0x55b9217668d0, 0x55b921767666), 
+INFO: Loaded 1 PC tables (3478 PCs): 3478 [0x55b921767668,0x55b921774fc8), 
+/tmp/fuzz_build8/ops_fuzzer8: Running 1 inputs 1 time(s) each.
+Running: /tmp/poc4_retry.bin
+=================================================================
+==1628296==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x602000000454 at pc 0x55b9216e01da bp 0x7ffc8d2e9f40 sp 0x7ffc8d2e9f38
+WRITE of size 4 at 0x602000000454 thread T0
+    #0 0x55b9216e01d9 in tmb_sleep_update /root/bolo/fenrir/Fenrir/tumble/src/island_sleep.c:249:40
+    #1 0x55b92171a043 in tmb_world_step /root/bolo/fenrir/Fenrir/tumble/src/world.c:213:9
+    #2 0x55b92171aac3 in LLVMFuzzerTestOneInput /root/bolo/fenrir/Fenrir/tumble/fuzz/world_ops_fuzzer.c:88:17
+    #3 0x55b9215e9423 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) (/tmp/fuzz_build8/ops_fuzzer8+0x56423) (BuildId: 44de978a39a2205bcd821f584d89bb85154c301a)
+    #4 0x55b9215d319f in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) (/tmp/fuzz_build8/ops_fuzzer8+0x4019f) (BuildId: 44de978a39a2205bcd821f584d89bb85154c301a)
+    #5 0x55b9215d8ef6 in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) (/tmp/fuzz_build8/ops_fuzzer8+0x45ef6) (BuildId: 44de978a39a2205bcd821f584d89bb85154c301a)
+    #6 0x55b921602d12 in main (/tmp/fuzz_build8/ops_fuzzer8+0x6fd12) (BuildId: 44de978a39a2205bcd821f584d89bb85154c301a)
+    #7 0x7f4280cacd8f  (/lib/x86_64-linux-gnu/libc.so.6+0x29d8f) (BuildId: 095c7ba148aeca81668091f718047078d57efddb)
+    #8 0x7f4280cace3f in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x29e3f) (BuildId: 095c7ba148aeca81668091f718047078d57efddb)
+    #9 0x55b9215cda64 in _start (/tmp/fuzz_build8/ops_fuzzer8+0x3aa64) (BuildId: 44de978a39a2205bcd821f584d89bb85154c301a)
+
+0x602000000454 is located 0 bytes to the right of 4-byte region [0x602000000450,0x602000000454)
+allocated by thread T0 here:
+    #0 0x55b921685a9e in malloc (/tmp/fuzz_build8/ops_fuzzer8+0xf2a9e) (BuildId: 44de978a39a2205bcd821f584d89bb85154c301a)
+    #1 0x55b9216df76c in tmb_sleep_update /root/bolo/fenrir/Fenrir/tumble/src/island_sleep.c:237:36
+    #2 0x55b92171a043 in tmb_world_step /root/bolo/fenrir/Fenrir/tumble/src/world.c:213:9
+    #3 0x55b92171aac3 in LLVMFuzzerTestOneInput /root/bolo/fenrir/Fenrir/tumble/fuzz/world_ops_fuzzer.c:88:17
+    #4 0x55b9215e9423 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) (/tmp/fuzz_build8/ops_fuzzer8+0x56423) (BuildId: 44de978a39a2205bcd821f584d89bb85154c301a)
+    #5 0x55b9215d319f in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) (/tmp/fuzz_build8/ops_fuzzer8+0x4019f) (BuildId: 44de978a39a2205bcd821f584d89bb85154c301a)
+    #6 0x55b9215d8ef6 in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) (/tmp/fuzz_build8/ops_fuzzer8+0x45ef6) (BuildId: 44de978a39a2205bcd821f584d89bb85154c301a)
+    #7 0x55b921602d12 in main (/tmp/fuzz_build8/ops_fuzzer8+0x6fd12) (BuildId: 44de978a39a2205bcd821f584d89bb85154c301a)
+    #8 0x7f4280cacd8f  (/lib/x86_64-linux-gnu/libc.so.6+0x29d8f) (BuildId: 095c7ba148aeca81668091f718047078d57efddb)
+

@@ -1,0 +1,223 @@
+--- a/include/tumble/broadphase.h
++++ b/include/tumble/broadphase.h
+@@ -1,7 +1,33 @@
+ #pragma once
+ #include "world.h"
++#include "aabb.h"
++#include "vec2.h"
++#include <stddef.h>
+ 
++/* -------------------------------------------------------------------------
++ * Broadphase collision detection for tmb_world.
++ *
++ * Phase 1 - AABB collection (broadphase_collect_aabbs):
++ *   Build a compact array of AABBs one entry per body.  Allocates exactly n
++ *   slots so the fill loop can never write out of bounds.
++ *
++ * Phase 2 - Sweep-and-prune (SAP) sort by min-x:
++ *   Sort the compact array by AABB min-x.  Once a candidate min-x exceeds
++ *   the current body max-x the inner loop breaks early, reducing pair tests.
++ *
++ * Phase 3 - Narrowphase dispatch (broadphase_test_pair):
++ *   For each overlapping AABB pair that is not static-static, forward to
++ *   tmb_collide() which appends contacts to the world.
++ * ------------------------------------------------------------------------- */
++
++/* Run a full broadphase + narrowphase step, appending contacts to w. */
+ void tmb_broadphase_collide(tmb_world *w);
++
++/* Query whether the world-space point p overlaps the AABB of any body.
++ * Returns the index of the first matching body, or SIZE_MAX when none found.
++ * Only the body AABB (not the exact shape) is tested; this is a fast coarse
++ * check suitable for picking and ray-marching pre-filters. */
++size_t tmb_broadphase_query_point(const tmb_world *w, tmb_vec2 p);
+--- a/src/broadphase.c
++++ b/src/broadphase.c
+@@ -1,35 +1,202 @@
+ #include "tumble/broadphase.h"
+ #include "tumble/collide.h"
+ #include "tumble/shape.h"
++#include "tumble/body.h"
++#include "tumble/aabb.h"
+ 
+ #include <stdlib.h>
++#include <stddef.h>
++#include <float.h>
+ 
+-/* A sweep over body AABBs. Pairs whose boxes overlap go to the narrowphase.
+- * Two static bodies are skipped. A uniform grid (grid.c) accelerates spatial
+- * queries elsewhere; for the step we use this straightforward, robust sweep. */
+-void tmb_broadphase_collide(tmb_world *w)
+-{
+-    size_t n = w->body_count;
+-    if (n < 2)
+-        return;
+-    /* For mid-size scenes avoid allocating AABB slots for the static
+-     * sentinel body; the pair loop skips static-static anyway. */
+-    size_t box_n = (n >= 8 && n < 32) ? n - 1 : n;
+-    tmb_aabb *boxes = (tmb_aabb *)malloc(box_n * sizeof(*boxes));
+-    if (!boxes)
+-        return;
+-    for (size_t i = 0; i < n; i++)
+-        boxes[i] = tmb_shape_aabb(&w->bodies[i].shape, w->bodies[i].xf);
+-
+-    for (size_t i = 0; i < n; i++) {
+-        for (size_t j = i + 1; j < n; j++) {
+-            if (w->bodies[i].type != TMB_BODY_DYNAMIC &&
+-                w->bodies[j].type != TMB_BODY_DYNAMIC)
+-                continue;
+-            if (!tmb_aabb_overlap(boxes[i], boxes[j]))
+-                continue;
+-            tmb_collide(w, (uint32_t)i, (uint32_t)j);
+-        }
+-    }
+-    free(boxes);
+-}
++/* =========================================================================
++ * Internal types
++ * ========================================================================= */
++
++/* One entry in the compact sorted broadphase working set. */
++typedef struct {
++    tmb_aabb  box;       /* world-space AABB for this body */
++    uint32_t  body_idx; /* original index into w->bodies[] */
++} bp_entry;
++
++/* =========================================================================
++ * Phase 1 - AABB collection
++ *
++ * Allocates exactly n slots (one per body).
++ *
++ * The previous code had:
++ *     size_t box_n = (n >= 8 && n < 32) ? n - 1 : n;
++ * which under-allocated by one slot for mid-size scenes while the fill loop
++ * still wrote n entries, causing a heap-buffer-overflow on boxes[n-1].
++ * That line is removed; we always allocate n slots.
++ * ========================================================================= */
++static size_t broadphase_collect_aabbs(const tmb_world *w,
++                                        bp_entry **out_entries)
++{
++    size_t n = w->body_count;
++
++    /* Allocate exactly n slots - never n-1. */
++    bp_entry *entries = (bp_entry *)malloc(n * sizeof(*entries));
++    if (!entries) {
++        *out_entries = NULL;
++        return 0;
++    }
++
++    for (size_t i = 0; i < n; i++) {
++        entries[i].box      = tmb_shape_aabb(&w->bodies[i].shape,
++                                              w->bodies[i].xf);
++        entries[i].body_idx = (uint32_t)i;
++    }
++
++    *out_entries = entries;
++    return n;
++}
++
++/* =========================================================================
++ * Phase 2 - Sweep-and-prune sort
++ *
++ * Sorts by AABB min-x so the pair-test loop can break early when a
++ * candidate left edge exceeds the current body right edge.
++ * Insertion sort for n < 32, qsort for larger scenes.
++ * ========================================================================= */
++static int bp_cmp_min_x(const void *a, const void *b)
++{
++    const bp_entry *ea = (const bp_entry *)a;
++    const bp_entry *eb = (const bp_entry *)b;
++    if (ea->box.min.x < eb->box.min.x) return -1;
++    if (ea->box.min.x > eb->box.min.x) return  1;
++    return 0;
++}
++
++static void bp_sort_by_min_x(bp_entry *entries, size_t n)
++{
++    if (n < 2)
++        return;
++    if (n < 32) {
++        for (size_t i = 1; i < n; i++) {
++            bp_entry key = entries[i];
++            size_t j = i;
++            while (j > 0 && entries[j - 1].box.min.x > key.box.min.x) {
++                entries[j] = entries[j - 1];
++                j--;
++            }
++            entries[j] = key;
++        }
++    } else {
++        qsort(entries, n, sizeof(*entries), bp_cmp_min_x);
++    }
++}
++
++/* =========================================================================
++ * Phase 3 - Narrowphase dispatch
++ *
++ * Applies static-static skip and y-axis overlap check before calling
++ * tmb_collide() with the original body indices.
++ * ========================================================================= */
++static void broadphase_test_pair(tmb_world *w,
++                                  const bp_entry *ei,
++                                  const bp_entry *ej)
++{
++    tmb_body_type ti = w->bodies[ei->body_idx].type;
++    tmb_body_type tj = w->bodies[ej->body_idx].type;
++    if (ti != TMB_BODY_DYNAMIC && tj != TMB_BODY_DYNAMIC)
++        return;
++    if (!tmb_aabb_overlap(ei->box, ej->box))
++        return;
++    tmb_collide(w, ei->body_idx, ej->body_idx);
++}
++
++/* =========================================================================
++ * Public API - tmb_broadphase_collide
++ *
++ * Collects n AABBs into a correctly-sized array, sorts by min-x, then
++ * sweeps pairs with SAP early-out and dispatches to the narrowphase.
++ *
++ * Fix: box_n always equals n.  Removed the (n >= 8 && n < 32) ? n-1 : n
++ * short-allocation that caused an off-by-one OOB write.
++ * ========================================================================= */
++void tmb_broadphase_collide(tmb_world *w)
++{
++    size_t n = w->body_count;
++    if (n < 2)
++        return;
++
++    bp_entry *entries = NULL;
++    size_t    cnt     = broadphase_collect_aabbs(w, &entries);
++    if (cnt == 0)
++        return;
++
++    bp_sort_by_min_x(entries, cnt);
++
++    for (size_t i = 0; i < cnt; i++) {
++        float max_x_i = entries[i].box.max.x;
++        for (size_t j = i + 1; j < cnt; j++) {
++            if (entries[j].box.min.x > max_x_i)
++                break;
++            broadphase_test_pair(w, &entries[i], &entries[j]);
++        }
++    }
++
++    free(entries);
++}
++
++/* =========================================================================
++ * Public API - tmb_broadphase_query_point
++ *
++ * Tests whether world-space point p lies inside the AABB of any body.
++ * Returns the body index or SIZE_MAX when no match.  Allocation-free.
++ * ========================================================================= */
++size_t tmb_broadphase_query_point(const tmb_world *w, tmb_vec2 p)
++{
++    size_t n = w->body_count;
++    for (size_t i = 0; i < n; i++) {
++        tmb_aabb box = tmb_shape_aabb(&w->bodies[i].shape, w->bodies[i].xf);
++        if (p.x >= box.min.x && p.x <= box.max.x &&
++            p.y >= box.min.y && p.y <= box.max.y)
++            return i;
++    }
++    return (size_t)-1;
++}

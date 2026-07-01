@@ -1,0 +1,1 @@
+The sleep system allocates island member records with one fewer slot than the actual member count for islands of two or more bodies. When the first two-body island goes to sleep, the second member index is written exactly four bytes past the end of a four-byte heap allocation, corrupting the heap.

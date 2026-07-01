@@ -1,0 +1,1 @@
+The velocity integration loop uses `<=` instead of `<` when comparing the iteration index against the body count, causing one read and write past the end of the body array on every simulation step. The overflow is most reliably detected when the body count exactly equals the allocated capacity.

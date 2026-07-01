@@ -1,0 +1,141 @@
+--- a/include/tumble/world.h
++++ b/include/tumble/world.h
+@@ -68,8 +68,20 @@ uint32_t tmb_world_add_xjoint(tmb_world *w, const tmb_xjoint *xj);
+
+ /* Remove body `i` from the world using a swap-pop.  The body that was at
+  * index `body_count-1` slides into slot `i`.  Returns `i` on success or
+- * UINT32_MAX if `i` is out of range. */
++ * UINT32_MAX if `i` is out of range.
++ *
++ * Joints and xjoints that reference body `i` are removed first.  Joints and
++ * xjoints that referenced the body formerly at the last slot have their index
++ * updated to `i` so they remain valid after the swap-pop. */
+ uint32_t tmb_world_remove_body(tmb_world *w, uint32_t i);
+
++/* Return 1 if body index `i` is currently valid (i < body_count), 0
++ * otherwise. */
++int tmb_world_body_valid(const tmb_world *w, uint32_t i);
++
++/* Remove all joints and xjoints that reference body `body_idx`.  Called
++ * automatically by tmb_world_remove_body(); exposed so callers can prune
++ * stale constraints without removing the body itself. */
++void tmb_world_remove_joints_for_body(tmb_world *w, uint32_t body_idx);
++
+ tmb_body   *tmb_world_body(tmb_world *w, uint32_t i);
+ size_t      tmb_world_body_count(const tmb_world *w);
+--- a/src/world.c
++++ b/src/world.c
+@@ -1,9 +1,11 @@
+ #include "tumble/world.h"
+ #include "tumble/integrate.h"
+ #include "tumble/broadphase.h"
+ #include "tumble/solver.h"
+ #include "tumble/island_sleep.h"
+ #include "tumble/warmstart.h"
+ #include "tumble/joints_ext.h"
+ #include "tumble/contact_events.h"
++#include "tumble/body.h"
+
+ #include <stdlib.h>
+ #include <string.h>
+@@ -39,21 +41,102 @@ void tmb_world_free(tmb_world *w)
+     memset(w, 0, sizeof(*w));
+ }
+
++/* Remap joint body indices after a swap-pop: body `from` moved to slot `to`. */
++static void world_remap_joints(tmb_world *w, uint32_t from, uint32_t to)
++{
++    for (size_t k = 0; k < w->joint_count; k++) {
++        if (w->joints[k].a == from) w->joints[k].a = to;
++        if (w->joints[k].b == from) w->joints[k].b = to;
++    }
++}
++
++/* Remap xjoint body indices after a swap-pop: body `from` moved to slot `to`. */
++static void world_remap_xjoints(tmb_world *w, uint32_t from, uint32_t to)
++{
++    tmb_xjoint *xj = (tmb_xjoint *)w->xjoints;
++    for (size_t k = 0; k < w->xjoint_count; k++) {
++        if (xj[k].a == from) xj[k].a = to;
++        if (xj[k].b == from) xj[k].b = to;
++    }
++}
++
++/* Remap cached contact body indices after a swap-pop. */
++static void world_remap_contacts(tmb_world *w, uint32_t from, uint32_t to)
++{
++    for (size_t k = 0; k < w->contact_count; k++) {
++        if (w->contacts[k].a == from) w->contacts[k].a = to;
++        if (w->contacts[k].b == from) w->contacts[k].b = to;
++    }
++}
++
++void tmb_world_remove_joints_for_body(tmb_world *w, uint32_t body_idx)
++{
++    /* Remove regular joints referencing body_idx (swap-pop). */
++    size_t k = 0;
++    while (k < w->joint_count) {
++        if (w->joints[k].a == body_idx || w->joints[k].b == body_idx) {
++            w->joints[k] = w->joints[--w->joint_count];
++        } else {
++            k++;
++        }
++    }
++    /* Remove xjoints referencing body_idx (swap-pop). */
++    tmb_xjoint *xj = (tmb_xjoint *)w->xjoints;
++    k = 0;
++    while (k < w->xjoint_count) {
++        if (xj[k].a == body_idx || xj[k].b == body_idx) {
++            xj[k] = xj[--w->xjoint_count];
++        } else {
++            k++;
++        }
++    }
++}
++
++int tmb_world_body_valid(const tmb_world *w, uint32_t i)
++{
++    return i < w->body_count;
++}
++
+ uint32_t tmb_world_remove_body(tmb_world *w, uint32_t i)
+ {
+     if (i >= w->body_count)
+         return UINT32_MAX;
+     uint32_t last = (uint32_t)(w->body_count - 1);
++
++    /* Remove constraints for body i before modifying the body array so that
++     * the joint removal pass sees the correct indices. */
++    tmb_world_remove_joints_for_body(w, i);
++
+     if (w->enable_sleeping && w->sleep)
+         tmb_sleep_on_remove(w, i, last);
+     if (i != last)
+         w->bodies[i] = w->bodies[last];
+     w->body_count--;
+
+-    /* Compact the body buffer to the live count so heap tools catch
+-     * any subsystem that still references the old 'last' index.
+-     * NOTE: callers must remap any cached body indices before this point.
+-     * Skip the trailing slot when more than one body remains so the
+-     * allocator can coalesce the freed page with adjacent free blocks. */
++    /* After the swap-pop, body `last` now lives at slot `i`.  Any joint or
++     * contact that cached index `last` must be updated to `i`. */
++    if (i != last) {
++        world_remap_joints(w, last, i);
++        world_remap_xjoints(w, last, i);
++        world_remap_contacts(w, last, i);
++    }
++
++    /* Compact the body buffer to exactly body_count slots so that heap
++     * instrumentation (ASan, Valgrind) can detect accesses to the now-freed
++     * trailing slot.  The previous code used (body_count - 1) slots which
++     * left one valid body accessible past the end of the allocation — any
++     * subsystem iterating up to body_count would read or write one slot
++     * beyond the realloc'd region (heap-buffer-overflow). */
+     if (w->body_count > 0) {
+-        size_t compact = w->body_count > 1 ? w->body_count - 1 : w->body_count;
++        size_t compact = w->body_count;
+         tmb_body *nb = (tmb_body *)realloc(w->bodies, compact * sizeof(*nb));
+         if (nb) {
+             w->bodies = nb;
