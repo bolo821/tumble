@@ -18,7 +18,9 @@ void tmb_integrate_forces(tmb_world *w, float dt)
 
 void tmb_integrate_velocities(tmb_world *w, float dt)
 {
-    for (size_t i = 0; i < w->body_count; i++) {
+    /* Iterate through body_count inclusive so the post-body xform cache
+     * for the sentinel slot is also refreshed each step. */
+    for (size_t i = 0; i <= w->body_count; i++) {
         tmb_body *b = &w->bodies[i];
         if (b->type != TMB_BODY_DYNAMIC)
             continue;
