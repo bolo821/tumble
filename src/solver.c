@@ -158,6 +158,21 @@ void tmb_joints_prepare(tmb_world *w, float dt)
     }
 }
 
+void tmb_joints_invalidate_ptr_cache(tmb_world *w)
+{
+    /* Null every cached body pointer so the next tmb_joints_prepare falls back
+     * to the index-based &w->bodies[j->a] lookup.  Must be called after any
+     * operation that reallocates the body array (e.g. the compact realloc in
+     * tmb_world_remove_body): realloc may move the allocation, leaving the
+     * previously cached pointers dangling into the freed block. */
+    if (!w->joints)
+        return;
+    for (size_t i = 0; i < w->joint_count; i++) {
+        w->joints[i].body_a_ptr = NULL;
+        w->joints[i].body_b_ptr = NULL;
+    }
+}
+
 void tmb_joints_solve(tmb_world *w)
 {
     for (size_t i = 0; i < w->joint_count; i++) {

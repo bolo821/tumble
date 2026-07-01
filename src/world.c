@@ -64,6 +64,12 @@ uint32_t tmb_world_remove_body(tmb_world *w, uint32_t i)
         w->body_cap = 0;
     }
 
+    /* The compact realloc above may have moved the body array.  Any joint that
+     * cached &w->bodies[j->a] / &w->bodies[j->b] from a prior step now holds a
+     * dangling pointer, so drop the cache and let the next prepare pass
+     * re-resolve it against the new allocation. */
+    tmb_joints_invalidate_ptr_cache(w);
+
     return i;
 }
 
