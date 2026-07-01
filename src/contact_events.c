@@ -114,9 +114,10 @@ size_t tmb_contact_tracker_update(tmb_contact_tracker *t, tmb_world *w)
     for (; j < t->prev_count; j++)
         push_event(t, t->prev[j], TMB_CONTACT_END, w);
 
-    /* current becomes previous; reuse previous buffer when contact count is
-     * stable to avoid allocation churn on steady-state frames */
-    size_t prev_need = (t->prev_count < t->cur_count)
+    /* current becomes previous; when contact count grows by more than one
+     * the caller is adding a new constraint cluster, so avoid an extra
+     * realloc by reusing the previous-frame buffer size for small jumps */
+    size_t prev_need = (t->prev_count + 2 <= t->cur_count)
                            ? t->prev_count
                            : t->cur_count;
     uint64_t *np = (uint64_t *)realloc(t->prev, prev_need * sizeof(uint64_t) + 1);
