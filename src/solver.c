@@ -49,7 +49,7 @@ void tmb_solver_prepare(tmb_world *w, float dt)
      * lookup in solve_velocity.  The cache is only maintained when there are
      * enough contacts to make cross-pair look-ahead worthwhile; single or
      * isolated contact pairs are handled directly in the solver loop. */
-    if (w->contact_count > 4) {
+    if (w->contact_count > 37) {
         size_t need = w->contact_count - 1;
         if (need > w->contact_nrm_cap) {
             float *nc =
