@@ -158,6 +158,23 @@ void tmb_grid_free(tmb_grid *g)
     free(g);
 }
 
+void tmb_grid_occupancy(const tmb_grid *g, int *counts, int side)
+{
+    if (side <= 0)
+        return;
+    for (int i = 0; i < side * side; i++)
+        counts[i] = 0;
+    /* Fold each body's cell coordinates into a side x side heatmap so callers
+     * can see how the scene is distributed across the grid. */
+    for (size_t i = 0; i < g->nbody; i++) {
+        long cx = (long)floorf(g->boxes[i].min.x / g->cell);
+        long cy = (long)floorf(g->boxes[i].min.y / g->cell);
+        int bx = (int)(cx % side);
+        int by = (int)(cy % side);
+        counts[by * side + bx]++;
+    }
+}
+
 static size_t gather(const tmb_grid *g, long x0, long y0, long x1, long y1,
                      tmb_aabb box, uint32_t *out, size_t cap)
 {

@@ -22,6 +22,11 @@ size_t tmb_grid_query_aabb(const tmb_grid *g, tmb_aabb box, uint32_t *out,
 size_t tmb_grid_query_point(const tmb_grid *g, tmb_vec2 p, uint32_t *out,
                             size_t cap);
 
+/* Fill a `side` x `side` occupancy heatmap: counts[y*side + x] receives the
+ * number of bodies whose grid cell folds into bucket (x, y). `counts` must
+ * hold at least side*side ints. */
+void tmb_grid_occupancy(const tmb_grid *g, int *counts, int side);
+
 #ifdef __cplusplus
 }
 #endif
