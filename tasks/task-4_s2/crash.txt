@@ -1,0 +1,74 @@
+INFO: Running with entropic power schedule (0xFF, 100).
+INFO: Seed: 806107985
+INFO: Loaded 1 modules   (15387 inline 8-bit counters): 15387 [0x5639d5e7ad80, 0x5639d5e7e99b), 
+INFO: Loaded 1 PC tables (15387 PCs): 15387 [0x5639d5e7e9a0,0x5639d5ebab50), 
+./fuzz_build_main4/world_ops_fuzzer: Running 1 inputs 1 time(s) each.
+Running: /tmp/poc_bug4.bin
+=================================================================
+==1719572==ERROR: AddressSanitizer: heap-use-after-free on address 0x6310000150b0 at pc 0x5639d5dcee2a bp 0x7ffee6f02c00 sp 0x7ffee6f02bf8
+READ of size 8 at 0x6310000150b0 thread T0
+    #0 0x5639d5dcee29 in tmb_joints_prepare /root/bolo/fenrir/Fenrir/tumble/src/solver.c:140:17
+    #1 0x5639d5df8fec in tmb_world_step /root/bolo/fenrir/Fenrir/tumble/src/world.c:168:5
+    #2 0x5639d5dfb117 in LLVMFuzzerTestOneInput /root/bolo/fenrir/Fenrir/tumble/fuzz/world_ops_fuzzer.c:94:17
+    #3 0x5639d5c64423 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) (/tmp/fuzz_build_main4/world_ops_fuzzer+0xe3423) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
+    #4 0x5639d5c4e19f in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) (/tmp/fuzz_build_main4/world_ops_fuzzer+0xcd19f) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
+    #5 0x5639d5c53ef6 in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) (/tmp/fuzz_build_main4/world_ops_fuzzer+0xd2ef6) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
+    #6 0x5639d5c7dd12 in main (/tmp/fuzz_build_main4/world_ops_fuzzer+0xfcd12) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
+    #7 0x7fc535a42d8f  (/lib/x86_64-linux-gnu/libc.so.6+0x29d8f) (BuildId: 095c7ba148aeca81668091f718047078d57efddb)
+    #8 0x7fc535a42e3f in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x29e3f) (BuildId: 095c7ba148aeca81668091f718047078d57efddb)
+    #9 0x5639d5c48a64 in _start (/tmp/fuzz_build_main4/world_ops_fuzzer+0xc7a64) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
+
+0x6310000150b0 is located 2224 bytes inside of 71680-byte region [0x631000014800,0x631000026000)
+freed by thread T0 here:
+    #0 0x5639d5d00ec6 in __interceptor_realloc (/tmp/fuzz_build_main4/world_ops_fuzzer+0x17fec6) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
+    #1 0x5639d5df5fe3 in tmb_world_remove_body /root/bolo/fenrir/Fenrir/tumble/src/world.c:56:36
+    #2 0x5639d5dfb1eb in LLVMFuzzerTestOneInput /root/bolo/fenrir/Fenrir/tumble/fuzz/world_ops_fuzzer.c:106:17
+    #3 0x5639d5c64423 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) (/tmp/fuzz_build_main4/world_ops_fuzzer+0xe3423) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
+    #4 0x5639d5c4e19f in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) (/tmp/fuzz_build_main4/world_ops_fuzzer+0xcd19f) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
+    #5 0x5639d5c53ef6 in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) (/tmp/fuzz_build_main4/world_ops_fuzzer+0xd2ef6) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
+    #6 0x5639d5c7dd12 in main (/tmp/fuzz_build_main4/world_ops_fuzzer+0xfcd12) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
+    #7 0x7fc535a42d8f  (/lib/x86_64-linux-gnu/libc.so.6+0x29d8f) (BuildId: 095c7ba148aeca81668091f718047078d57efddb)
+
+previously allocated by thread T0 here:
+    #0 0x5639d5d00ec6 in __interceptor_realloc (/tmp/fuzz_build_main4/world_ops_fuzzer+0x17fec6) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
+    #1 0x5639d5df6837 in tmb_world_add_body /root/bolo/fenrir/Fenrir/tumble/src/world.c:76:36
+    #2 0x5639d5dfac35 in LLVMFuzzerTestOneInput /root/bolo/fenrir/Fenrir/tumble/fuzz/world_ops_fuzzer.c:65:5
+    #3 0x5639d5c64423 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) (/tmp/fuzz_build_main4/world_ops_fuzzer+0xe3423) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
+    #4 0x5639d5c4e19f in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) (/tmp/fuzz_build_main4/world_ops_fuzzer+0xcd19f) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
+    #5 0x5639d5c53ef6 in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) (/tmp/fuzz_build_main4/world_ops_fuzzer+0xd2ef6) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
+    #6 0x5639d5c7dd12 in main (/tmp/fuzz_build_main4/world_ops_fuzzer+0xfcd12) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
+    #7 0x7fc535a42d8f  (/lib/x86_64-linux-gnu/libc.so.6+0x29d8f) (BuildId: 095c7ba148aeca81668091f718047078d57efddb)
+
+SUMMARY: AddressSanitizer: heap-use-after-free /root/bolo/fenrir/Fenrir/tumble/src/solver.c:140:17 in tmb_joints_prepare
+Shadow bytes around the buggy address:
+  0x0c627fffa9c0: fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd
+  0x0c627fffa9d0: fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd
+  0x0c627fffa9e0: fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd
+  0x0c627fffa9f0: fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd
+  0x0c627fffaa00: fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd
+=>0x0c627fffaa10: fd fd fd fd fd fd[fd]fd fd fd fd fd fd fd fd fd
+  0x0c627fffaa20: fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd
+  0x0c627fffaa30: fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd
+  0x0c627fffaa40: fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd
+  0x0c627fffaa50: fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd
+  0x0c627fffaa60: fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd
+Shadow byte legend (one shadow byte represents 8 application bytes):
+  Addressable:           00
+  Partially addressable: 01 02 03 04 05 06 07 
+  Heap left redzone:       fa
+  Freed heap region:       fd
+  Stack left redzone:      f1
+  Stack mid redzone:       f2
+  Stack right redzone:     f3
+  Stack after return:      f5
+  Stack use after scope:   f8
+  Global redzone:          f9
+  Global init order:       f6
+  Poisoned by user:        f7
+  Container overflow:      fc
+  Array cookie:            ac
+  Intra object redzone:    bb
+  ASan internal:           fe
+  Left alloca redzone:     ca
+  Right alloca redzone:    cb
+==1719572==ABORTING

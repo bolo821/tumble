@@ -1,0 +1,380 @@
+diff --git a/fuzz/world_ops_fuzzer.c b/fuzz/world_ops_fuzzer.c
+index 10a0e59..c37f2a2 100644
+--- a/fuzz/world_ops_fuzzer.c
++++ b/fuzz/world_ops_fuzzer.c
+@@ -93,6 +93,14 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
+             for (int k = 0; k < steps && budget-- > 0; k++) {
+                 tmb_world_step(&w, 1.0f / 60.0f);
+                 tmb_recorder_capture(&rec, &w);
++                /* Verify the nrm_cache allocation covers all contacts after
++                 * each step.  Catching the invariant violation here surfaces a
++                 * clean trap rather than a delayed out-of-bounds write. */
++                if (w.contact_count > 37) {
++                    char cerr[256];
++                    if (tmb_solver_cache_validate(&w, cerr, sizeof(cerr)) != 0)
++                        __builtin_trap();
++                }
+             }
+             break;
+         }
+diff --git a/include/tumble/solver.h b/include/tumble/solver.h
+index fb62121..6cf8329 100644
+--- a/include/tumble/solver.h
++++ b/include/tumble/solver.h
+@@ -10,6 +10,22 @@ void tmb_solver_solve_velocity(tmb_world *w);
+ void tmb_solver_solve_position(tmb_world *w);
+ void tmb_joints_prepare(tmb_world *w, float dt);
+ void tmb_joints_solve(tmb_world *w);
++
++/* Validate the contact-normal-impulse cache invariant.
++ *
++ * When the cache is active (contact_count > 37), the cache buffer must cover
++ * at least contact_count entries — i.e. contact_nrm_cap >= contact_count.
++ * Call after tmb_world_step to confirm no frame exceeded the allocation.
++ *
++ * Returns 0 if the invariant holds (or the cache is inactive), -1 with a
++ * human-readable description in msg[0..msg_len-1] if it was violated.
++ *
++ * Typical usage:
++ *   char err[256];
++ *   if (tmb_solver_cache_validate(&w, err, sizeof(err)) != 0)
++ *       fprintf(stderr, "%s\n", err);
++ */
++int tmb_solver_cache_validate(const tmb_world *w, char *msg, size_t msg_len);
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/src/solver.c b/src/solver.c
+index 600f722..c7da67b 100644
+--- a/src/solver.c
++++ b/src/solver.c
+@@ -1,6 +1,7 @@
+ #include "tumble/solver.h"
+ 
+ #include <math.h>
++#include <stdio.h>
+ #include <stdlib.h>
+ 
+ #define TMB_SLOP 0.005f
+@@ -48,9 +49,12 @@ void tmb_solver_prepare(tmb_world *w, float dt)
+     /* Refresh the per-contact normal-impulse mirror used by the cross-pair
+      * lookup in solve_velocity.  The cache is only maintained when there are
+      * enough contacts to make cross-pair look-ahead worthwhile; single or
+-     * isolated contact pairs are handled directly in the solver loop. */
++     * isolated contact pairs are handled directly in the solver loop.
++     *
++     * Invariant: when the cache is active, contact_nrm_cap >= contact_count
++     * so that the write loop below never exceeds the allocation. */
+     if (w->contact_count > 37) {
+-        size_t need = w->contact_count - 1;
++        size_t need = w->contact_count;
+         if (need > w->contact_nrm_cap) {
+             float *nc =
+                 (float *)realloc(w->contact_nrm_cache, need * sizeof(float));
+@@ -59,13 +63,34 @@ void tmb_solver_prepare(tmb_world *w, float dt)
+                 w->contact_nrm_cap   = need;
+             }
+         }
+-        if (w->contact_nrm_cache) {
++        if (w->contact_nrm_cache && w->contact_nrm_cap >= w->contact_count) {
+             for (size_t i = 0; i < w->contact_count; i++)
+                 w->contact_nrm_cache[i] = w->contacts[i].normal_impulse;
+         }
+     }
+ }
+ 
++/* ---- cache diagnostics ---- */
++
++int tmb_solver_cache_validate(const tmb_world *w, char *msg, size_t msg_len)
++{
++    /* Cache is only activated for high-contact frames; below threshold it is
++     * unused and there is nothing to check. */
++    if (w->contact_count <= 37)
++        return 0;
++    if (!w->contact_nrm_cache)
++        return 0; /* allocation may have failed; skip */
++    if (w->contact_nrm_cap < w->contact_count) {
++        if (msg && msg_len)
++            snprintf(msg, msg_len,
++                     "nrm_cache: cap=%zu < contact_count=%zu — cache would "
++                     "have been written out-of-bounds this step",
++                     w->contact_nrm_cap, w->contact_count);
++        return -1;
++    }
++    return 0;
++}
++
+ void tmb_solver_solve_velocity(tmb_world *w)
+ {
+     for (size_t i = 0; i < w->contact_count; i++) {
+diff --git a/tests/test_solver_cache.c b/tests/test_solver_cache.c
+new file mode 100644
+index 0000000..bbff101
+--- /dev/null
++++ b/tests/test_solver_cache.c
+@@ -0,0 +1,265 @@
++/* Regression tests for the contact-normal-impulse cache in tmb_solver_prepare.
++ *
++ * The cache is active when contact_count > 37.  The buffer must be sized to
++ * hold at least contact_count entries; an off-by-one in the realloc call
++ * (allocating contact_count-1 entries instead of contact_count) causes a
++ * one-slot heap-buffer-overflow on the first frame with 38+ contacts.
++ *
++ * These tests confirm:
++ *   1. The cache is not activated for scenes with few contacts.
++ *   2. When the cache is activated, its capacity is >= contact_count.
++ *   3. The engine survives many steps with a large contact set without
++ *      ASan catching an out-of-bounds write.
++ *   4. The cache capacity grows correctly when contact_count grows.
++ */
++
++#include "tumble/tumble.h"
++#include "tumble/solver.h"
++
++#include "tttest.h"
++
++/* ---- helpers ---- */
++
++static void add_floor(tmb_world *w)
++{
++    tmb_body f;
++    tmb_body_init(&f, TMB_BODY_STATIC, tmb_shape_box(40.0f, 1.0f),
++                  tmb_v2(0, -5.0f));
++    tmb_world_add_body(w, &f);
++}
++
++static void add_column(tmb_world *w, int n, float x_offset)
++{
++    for (int i = 0; i < n; i++) {
++        tmb_body b;
++        tmb_body_init(&b, TMB_BODY_DYNAMIC, tmb_shape_box(0.5f, 0.5f),
++                      tmb_v2(x_offset, -0.5f + (float)i * 0.6f));
++        tmb_world_add_body(w, &b);
++    }
++}
++
++static int check_cache(const tmb_world *w)
++{
++    char msg[256];
++    int rc = tmb_solver_cache_validate(w, msg, sizeof(msg));
++    if (rc != 0)
++        fprintf(stderr, "  cache: %s\n", msg);
++    return rc;
++}
++
++/* ---- tests ---- */
++
++/* With only 2 bodies the contact count stays below 38; the cache must not
++ * be allocated (and the validate function must report OK). */
++static int test_cache_inactive_below_threshold(void)
++{
++    tmb_world w;
++    tmb_world_init(&w);
++    w.gravity = tmb_v2(0, -10.0f);
++    add_floor(&w);
++
++    tmb_body b;
++    tmb_body_init(&b, TMB_BODY_DYNAMIC, tmb_shape_box(0.5f, 0.5f),
++                  tmb_v2(0, 1.0f));
++    tmb_world_add_body(&w, &b);
++
++    for (int i = 0; i < 30; i++) {
++        tmb_world_step(&w, 1.0f / 60.0f);
++        CHECK(check_cache(&w) == 0);
++        /* With one dynamic box there are at most 2 contact points. */
++        CHECK(w.contact_count <= 10);
++    }
++
++    tmb_world_free(&w);
++    return 0;
++}
++
++/* A column of 20 boxes generates 38 contacts on the first step.  The cache
++ * must be allocated and sized to cover all contacts. */
++static int test_cache_activated_at_38_contacts(void)
++{
++    tmb_world w;
++    tmb_world_init(&w);
++    w.gravity = tmb_v2(0, -10.0f);
++    add_floor(&w);
++    add_column(&w, 20, 0.0f);
++
++    /* First step: 38 contact points generated by the 20-box stack. */
++    tmb_world_step(&w, 1.0f / 60.0f);
++
++    /* The buggy code allocates contact_count-1=37 entries but writes 38;
++     * ASan catches the OOB before we get here.  The fixed code allocates 38. */
++    if (w.contact_count > 37) {
++        CHECK(w.contact_nrm_cache != NULL);
++        CHECK(w.contact_nrm_cap >= w.contact_count);
++        CHECK(check_cache(&w) == 0);
++    }
++
++    tmb_world_free(&w);
++    return 0;
++}
++
++/* Run 120 steps with the 20-box stack to confirm the cache stays valid
++ * across many frames (including re-growth when contact_count fluctuates). */
++static int test_cache_stable_over_many_steps(void)
++{
++    tmb_world w;
++    tmb_world_init(&w);
++    w.gravity = tmb_v2(0, -10.0f);
++    add_floor(&w);
++    add_column(&w, 20, 0.0f);
++
++    for (int i = 0; i < 120; i++) {
++        tmb_world_step(&w, 1.0f / 60.0f);
++        CHECK(check_cache(&w) == 0);
++    }
++
++    tmb_world_free(&w);
++    return 0;
++}
++
++/* Two columns side-by-side increase the contact count further; verify the
++ * cache still grows correctly when contact_count exceeds the prior cap. */
++static int test_cache_grows_with_contact_count(void)
++{
++    tmb_world w;
++    tmb_world_init(&w);
++    w.gravity = tmb_v2(0, -10.0f);
++    add_floor(&w);
++    add_column(&w, 20, -0.6f);  /* left column — 38 contacts with floor/pairs */
++    add_column(&w, 20,  0.6f);  /* right column — additional contacts */
++
++    size_t prev_cap = 0;
++    for (int i = 0; i < 60; i++) {
++        tmb_world_step(&w, 1.0f / 60.0f);
++        CHECK(check_cache(&w) == 0);
++        if (w.contact_count > 37 && w.contact_nrm_cache) {
++            /* Cap must be at least the current count. */
++            CHECK(w.contact_nrm_cap >= w.contact_count);
++            /* Cap must not decrease (realloc only grows). */
++            CHECK(w.contact_nrm_cap >= prev_cap);
++            prev_cap = w.contact_nrm_cap;
++        }
++    }
++
++    tmb_world_free(&w);
++    return 0;
++}
++
++/* Validate that clearing the world (free + re-init) resets the cache fields
++ * without leaking memory (checked indirectly via ASan leak detection). */
++static int test_cache_freed_with_world(void)
++{
++    tmb_world w;
++    tmb_world_init(&w);
++    w.gravity = tmb_v2(0, -10.0f);
++    add_floor(&w);
++    add_column(&w, 20, 0.0f);
++
++    /* Run until the cache is allocated. */
++    for (int i = 0; i < 5; i++)
++        tmb_world_step(&w, 1.0f / 60.0f);
++
++    CHECK(w.contact_nrm_cache != NULL || w.contact_count <= 37);
++
++    /* tmb_world_free must free contact_nrm_cache; if it does not, ASan's
++     * leak detection will flag it at process exit. */
++    tmb_world_free(&w);
++
++    /* After free the fields should be zeroed by the memset inside world_free. */
++    CHECK(w.contact_nrm_cache == NULL);
++    CHECK(w.contact_nrm_cap == 0);
++    return 0;
++}
++
++/* Exact-threshold test: add bodies until we get exactly 38 contacts, then
++ * verify once more that the cache covers all entries. */
++static int test_cache_exact_threshold_boundary(void)
++{
++    /* 20 stacked boxes = 2*(20-1) = 38 contacts against adjacent bodies plus
++     * the floor (2 contacts per box-pair, 1 against floor per lowest box).
++     * The exact count depends on the broadphase; just confirm the invariant. */
++    tmb_world w;
++    tmb_world_init(&w);
++    w.gravity = tmb_v2(0, -10.0f);
++    add_floor(&w);
++    add_column(&w, 20, 0.0f);
++
++    tmb_world_step(&w, 1.0f / 60.0f);
++    CHECK(check_cache(&w) == 0);
++    if (w.contact_count > 37) {
++        /* The critical invariant: cap must cover EVERY contact slot. */
++        CHECK(w.contact_nrm_cap >= w.contact_count);
++    }
++
++    tmb_world_free(&w);
++    return 0;
++}
++
++/* Gravity reversal mid-run: contact count drops then rises; verify the cache
++ * handles the transition in both directions without corruption. */
++static int test_cache_survives_contact_count_transition(void)
++{
++    tmb_world w;
++    tmb_world_init(&w);
++    w.gravity = tmb_v2(0, -10.0f);
++    add_floor(&w);
++    add_column(&w, 20, 0.0f);
++
++    /* Run 10 steps with full stack (cache active). */
++    for (int i = 0; i < 10; i++) {
++        tmb_world_step(&w, 1.0f / 60.0f);
++        CHECK(check_cache(&w) == 0);
++    }
++
++    /* Flip gravity upward: bodies fly off, contact count drops below 38. */
++    w.gravity = tmb_v2(0, 10.0f);
++    for (int i = 0; i < 20; i++) {
++        tmb_world_step(&w, 1.0f / 60.0f);
++        CHECK(check_cache(&w) == 0);
++    }
++
++    /* Flip back: bodies fall again, cache must re-activate cleanly. */
++    w.gravity = tmb_v2(0, -10.0f);
++    for (int i = 0; i < 30; i++) {
++        tmb_world_step(&w, 1.0f / 60.0f);
++        CHECK(check_cache(&w) == 0);
++    }
++
++    tmb_world_free(&w);
++    return 0;
++}
++
++/* Sleeping world: once all bodies sleep there are no contacts; the cache
++ * must still be valid (trivially, since count == 0). */
++static int test_cache_with_sleeping_world(void)
++{
++    tmb_world w;
++    tmb_world_init(&w);
++    w.gravity     = tmb_v2(0, -10.0f);
++    w.enable_sleeping = 1;
++    add_floor(&w);
++    add_column(&w, 20, 0.0f);
++
++    for (int i = 0; i < 300; i++) {
++        tmb_world_step(&w, 1.0f / 60.0f);
++        CHECK(check_cache(&w) == 0);
++    }
++
++    tmb_world_free(&w);
++    return 0;
++}
++
++int main(void)
++{
++    int r = 0;
++    r |= test_cache_inactive_below_threshold();
++    r |= test_cache_activated_at_38_contacts();
++    r |= test_cache_stable_over_many_steps();
++    r |= test_cache_grows_with_contact_count();
++    r |= test_cache_freed_with_world();
++    r |= test_cache_exact_threshold_boundary();
++    r |= test_cache_survives_contact_count_transition();
++    r |= test_cache_with_sleeping_world();
++    TT_DONE();
++}

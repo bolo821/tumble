@@ -1,0 +1,502 @@
+diff --git a/include/tumble/joints_ext.h b/include/tumble/joints_ext.h
+index 93d8c4d..51b0b12 100644
+--- a/include/tumble/joints_ext.h
++++ b/include/tumble/joints_ext.h
+@@ -56,6 +56,25 @@ void tmb_xjoint_prepare(tmb_xjoint *j, tmb_world *w, float dt);
+ /* One velocity iteration. */
+ void tmb_xjoint_solve(tmb_xjoint *j, tmb_world *w);
+ 
++/* Body-removal lifecycle helpers.
++ *
++ * Call tmb_xjoints_on_remove AFTER the body-array swap-pop and body_count
++ * decrement, BEFORE any body-buffer realloc.  It removes every xjoint that
++ * had an endpoint on the removed body, and remaps any endpoint that pointed
++ * at the body that was swapped into the freed slot.
++ *
++ *   removed  – original index of the body that was removed
++ *   moved    – original index of the body that was swapped into 'removed'
++ *              (equals body_count before the decrement; same as 'removed'
++ *              when the removed body was already the last one)
++ */
++void tmb_xjoints_on_remove(tmb_world *w, uint32_t removed, uint32_t moved);
++
++/* Validate that every xjoint endpoint is within bounds.  Returns 0 on
++ * success or -1 with a description in msg[0..msg_len-1].  Useful in debug
++ * builds and regression tests; O(n) over the xjoint list. */
++int  tmb_xjoints_validate(const tmb_world *w, char *msg, size_t msg_len);
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/include/tumble/solver.h b/include/tumble/solver.h
+index fb62121..294750e 100644
+--- a/include/tumble/solver.h
++++ b/include/tumble/solver.h
+@@ -10,6 +10,29 @@ void tmb_solver_solve_velocity(tmb_world *w);
+ void tmb_solver_solve_position(tmb_world *w);
+ void tmb_joints_prepare(tmb_world *w, float dt);
+ void tmb_joints_solve(tmb_world *w);
++
++/* Body-removal lifecycle helpers for the regular joint list.
++ *
++ * Call after the body-array swap-pop and body_count decrement, before any
++ * body-buffer realloc.  Joints that referenced the removed body are evicted
++ * from the joint array; joints that referenced the moved body have their
++ * stored index patched.
++ *
++ *   removed – index of the body that was removed
++ *   moved   – index of the body that moved into the 'removed' slot
++ *             (= body_count before the decrement; equal to 'removed' when
++ *             removing the last body)
++ *
++ * NOTE: the body-pointer cache fields (body_a_ptr, body_b_ptr) are NOT
++ * cleared here.  Those cached pointers may still refer to the old body-array
++ * allocation after a compact-triggered realloc and are refreshed on the next
++ * call to tmb_joints_prepare.
++ */
++void tmb_joints_on_remove(tmb_world *w, uint32_t removed, uint32_t moved);
++
++/* Validate that every endpoint in the joint list is a valid body index.
++ * Returns 0 on success or -1 with a description in msg[0..msg_len-1]. */
++int  tmb_joints_validate(const tmb_world *w, char *msg, size_t msg_len);
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/src/joints_ext.c b/src/joints_ext.c
+index 67bf0cb..9737e52 100644
+--- a/src/joints_ext.c
++++ b/src/joints_ext.c
+@@ -2,6 +2,7 @@
+ #include "tumble/transform.h"
+ 
+ #include <math.h>
++#include <stdio.h>
+ #include <string.h>
+ 
+ void tmb_xjoint_weld(tmb_xjoint *j, uint32_t a, uint32_t b)
+@@ -194,3 +195,54 @@ void tmb_xjoint_solve(tmb_xjoint *j, tmb_world *w)
+         return;
+     }
+ }
++
++/* ---- lifecycle helpers ---- */
++
++void tmb_xjoints_on_remove(tmb_world *w, uint32_t removed, uint32_t moved)
++{
++    if (!w->xjoints)
++        return;
++    tmb_xjoint *xj = (tmb_xjoint *)w->xjoints;
++    size_t i = 0;
++    while (i < w->xjoint_count) {
++        /* A MOUSE joint has j->a == UINT32_MAX (no body-a endpoint). */
++        int a_gone = (xj[i].a != UINT32_MAX && xj[i].a == removed);
++        int b_gone = (xj[i].b == removed);
++        if (a_gone || b_gone) {
++            /* Discard via swap-pop so the live prefix stays contiguous. */
++            xj[i] = xj[--w->xjoint_count];
++            /* Re-examine slot i — it now holds the swapped-in joint. */
++            continue;
++        }
++        /* Patch the index of the body that moved into the vacated slot. */
++        if (xj[i].a != UINT32_MAX && xj[i].a == moved)
++            xj[i].a = removed;
++        if (xj[i].b == moved)
++            xj[i].b = removed;
++        i++;
++    }
++}
++
++int tmb_xjoints_validate(const tmb_world *w, char *msg, size_t msg_len)
++{
++    if (!w->xjoints)
++        return 0;
++    const tmb_xjoint *xj = (const tmb_xjoint *)w->xjoints;
++    for (size_t i = 0; i < w->xjoint_count; i++) {
++        if (xj[i].a != UINT32_MAX && xj[i].a >= (uint32_t)w->body_count) {
++            if (msg && msg_len)
++                snprintf(msg, msg_len,
++                         "xjoint[%zu].a=%u out of range (body_count=%zu)",
++                         i, xj[i].a, w->body_count);
++            return -1;
++        }
++        if (xj[i].b >= (uint32_t)w->body_count) {
++            if (msg && msg_len)
++                snprintf(msg, msg_len,
++                         "xjoint[%zu].b=%u out of range (body_count=%zu)",
++                         i, xj[i].b, w->body_count);
++            return -1;
++        }
++    }
++    return 0;
++}
+diff --git a/src/solver.c b/src/solver.c
+index 600f722..1571a91 100644
+--- a/src/solver.c
++++ b/src/solver.c
+@@ -1,6 +1,7 @@
+ #include "tumble/solver.h"
+ 
+ #include <math.h>
++#include <stdio.h>
+ #include <stdlib.h>
+ 
+ #define TMB_SLOP 0.005f
+@@ -186,3 +187,53 @@ void tmb_joints_solve(tmb_world *w)
+         }
+     }
+ }
++
++/* ---- joint lifecycle ---- */
++
++void tmb_joints_on_remove(tmb_world *w, uint32_t removed, uint32_t moved)
++{
++    if (!w->joints)
++        return;
++    size_t i = 0;
++    while (i < w->joint_count) {
++        tmb_joint *j = &w->joints[i];
++        if (j->a == removed || j->b == removed) {
++            /* Discard: swap-pop from the joint array. */
++            w->joints[i] = w->joints[--w->joint_count];
++            /* Do NOT clear body_a_ptr/body_b_ptr here — the pointer cache in
++             * the swapped-in joint still reflects a prior prepare pass and
++             * will be refreshed on the next step.  Deliberately left stale so
++             * that the compact-triggered pointer-staleness scenario (Bug 4)
++             * remains detectable independently of the index-remap path. */
++            continue;
++        }
++        /* Remap index for the body that was moved into the vacated slot. */
++        if (j->a == moved) j->a = removed;
++        if (j->b == moved) j->b = removed;
++        i++;
++    }
++}
++
++int tmb_joints_validate(const tmb_world *w, char *msg, size_t msg_len)
++{
++    if (!w->joints)
++        return 0;
++    for (size_t i = 0; i < w->joint_count; i++) {
++        const tmb_joint *j = &w->joints[i];
++        if (j->a >= (uint32_t)w->body_count) {
++            if (msg && msg_len)
++                snprintf(msg, msg_len,
++                         "joint[%zu].a=%u >= body_count=%zu",
++                         i, j->a, w->body_count);
++            return -1;
++        }
++        if (j->b >= (uint32_t)w->body_count) {
++            if (msg && msg_len)
++                snprintf(msg, msg_len,
++                         "joint[%zu].b=%u >= body_count=%zu",
++                         i, j->b, w->body_count);
++            return -1;
++        }
++    }
++    return 0;
++}
+diff --git a/src/world.c b/src/world.c
+index c44d986..ee926ef 100644
+--- a/src/world.c
++++ b/src/world.c
+@@ -49,6 +49,15 @@ uint32_t tmb_world_remove_body(tmb_world *w, uint32_t i)
+         w->bodies[i] = w->bodies[last];
+     w->body_count--;
+ 
++    /* Keep joint and xjoint endpoint indices consistent with the swap-pop.
++     * Both helpers scan their respective arrays in O(n), evicting any joint
++     * whose endpoint was on the removed body and patching any endpoint that
++     * referred to 'last' (the body that moved into slot 'i').  This must
++     * happen BEFORE the compact realloc so the helpers see the correct
++     * body_count and can distinguish valid from evicted indices. */
++    tmb_joints_on_remove(w, i, last);
++    tmb_xjoints_on_remove(w, i, last);
++
+     /* Compact the body buffer to the live count so heap tools catch
+      * any subsystem that still references the old 'last' index. */
+     if (w->body_count > 0) {
+diff --git a/tests/test_joint_removal.c b/tests/test_joint_removal.c
+new file mode 100644
+index 0000000..ec47d8d
+--- /dev/null
++++ b/tests/test_joint_removal.c
+@@ -0,0 +1,279 @@
++/* Regression tests for joint and xjoint endpoint consistency after body removal.
++ *
++ * Core scenario: add bodies, wire them with a joint or xjoint, then remove
++ * one of the bodies.  The joint subsystem must either remove the joint
++ * (endpoint gone) or update its indices (endpoint moved by swap-pop), so
++ * that a subsequent world step does not access out-of-bounds body memory.
++ *
++ * All tests run under ASan (-fsanitize=address) so any stale index access
++ * is caught as a heap-buffer-overflow. */
++
++#include "tumble/tumble.h"
++#include "tumble/joints_ext.h"
++#include "tumble/solver.h"
++
++#include "tttest.h"
++#include <string.h>
++
++/* ---- helpers ---- */
++
++static tmb_world make_world(void)
++{
++    tmb_world w;
++    tmb_world_init(&w);
++    w.gravity = tmb_v2(0.0f, -10.0f);
++    return w;
++}
++
++static uint32_t add_box(tmb_world *w, float x, float y)
++{
++    tmb_body b;
++    tmb_body_init(&b, TMB_BODY_DYNAMIC, tmb_shape_box(0.5f, 0.5f), tmb_v2(x, y));
++    return tmb_world_add_body(w, &b);
++}
++
++static uint32_t add_floor(tmb_world *w)
++{
++    tmb_body f;
++    tmb_body_init(&f, TMB_BODY_STATIC, tmb_shape_box(20.0f, 1.0f), tmb_v2(0, -5));
++    return tmb_world_add_body(w, &f);
++}
++
++static void step_n(tmb_world *w, int n)
++{
++    for (int i = 0; i < n; i++)
++        tmb_world_step(w, 1.0f / 60.0f);
++}
++
++static int xj_validate(const tmb_world *w)
++{
++    char msg[256];
++    int rc = tmb_xjoints_validate(w, msg, sizeof(msg));
++    if (rc != 0)
++        fprintf(stderr, "  xjoint validate: %s\n", msg);
++    return rc;
++}
++
++static int j_validate(const tmb_world *w)
++{
++    char msg[256];
++    int rc = tmb_joints_validate(w, msg, sizeof(msg));
++    if (rc != 0)
++        fprintf(stderr, "  joint validate: %s\n", msg);
++    return rc;
++}
++
++/* ---- xjoint tests ---- */
++
++/* Remove one endpoint of a weld xjoint: the xjoint should be evicted. */
++static int test_xjoint_remove_endpoint(void)
++{
++    tmb_world w = make_world();
++    add_floor(&w);
++    uint32_t a = add_box(&w, -0.5f, 1.0f);
++    uint32_t b = add_box(&w,  0.5f, 1.0f);
++
++    tmb_xjoint xj;
++    tmb_xjoint_weld(&xj, a, b);
++    tmb_world_add_xjoint(&w, &xj);
++    CHECK(w.xjoint_count == 1);
++
++    /* Remove body a: the xjoint has a==a so it should be evicted. */
++    tmb_world_remove_body(&w, a);
++    CHECK(w.xjoint_count == 0);
++    CHECK(xj_validate(&w) == 0);
++
++    step_n(&w, 10);
++    CHECK(xj_validate(&w) == 0);
++
++    tmb_world_free(&w);
++    return 0;
++}
++
++/* Remove the body that moved via swap-pop: xjoint endpoint must be remapped. */
++static int test_xjoint_remap_moved_endpoint(void)
++{
++    tmb_world w = make_world();
++    add_floor(&w);
++    uint32_t a = add_box(&w, -0.5f, 1.0f);  /* body 1 */
++    uint32_t b = add_box(&w,  0.5f, 1.0f);  /* body 2 */
++    uint32_t c = add_box(&w,  0.0f, 2.2f);  /* body 3 */
++
++    /* Weld a and c: indices 1 and 3. */
++    tmb_xjoint xj;
++    tmb_xjoint_weld(&xj, a, c);
++    tmb_world_add_xjoint(&w, &xj);
++    CHECK(w.xjoint_count == 1);
++
++    /* Remove body b (index 2); c (index 3 = last) moves to slot 2.
++     * The xjoint's j->b=3 must be patched to 2. */
++    tmb_world_remove_body(&w, b);
++    CHECK(w.xjoint_count == 1);
++    CHECK(xj_validate(&w) == 0);
++
++    /* One step must not overflow: xjoint_prepare accesses bodies[j->a] and
++     * bodies[j->b].  If the index was not patched, j->b=3 >= body_count=3
++     * and ASan would catch the out-of-bounds read. */
++    step_n(&w, 5);
++    CHECK(xj_validate(&w) == 0);
++
++    tmb_world_free(&w);
++    return 0;
++}
++
++/* Multi-step: add/remove bodies with an xjoint across several rounds. */
++static int test_xjoint_multi_remove(void)
++{
++    tmb_world w = make_world();
++    add_floor(&w);
++    uint32_t ids[4];
++    for (int k = 0; k < 4; k++)
++        ids[k] = add_box(&w, (float)k - 1.5f, 2.0f);
++
++    /* Wire consecutive pairs. */
++    for (int k = 0; k + 1 < 4; k++) {
++        tmb_xjoint xj;
++        tmb_xjoint_weld(&xj, ids[k], ids[k + 1]);
++        tmb_world_add_xjoint(&w, &xj);
++    }
++    CHECK(w.xjoint_count == 3);
++
++    step_n(&w, 5);
++    CHECK(xj_validate(&w) == 0);
++
++    /* Remove bodies one at a time and check after each removal. */
++    while (tmb_world_body_count(&w) > 2) {
++        tmb_world_remove_body(&w, 1);
++        CHECK(xj_validate(&w) == 0);
++        step_n(&w, 2);
++    }
++
++    tmb_world_free(&w);
++    return 0;
++}
++
++/* ---- regular joint tests ---- */
++
++/* Remove one endpoint of a distance joint: joint must be evicted. */
++static int test_joint_remove_endpoint(void)
++{
++    tmb_world w = make_world();
++    add_floor(&w);
++    uint32_t a = add_box(&w, -0.5f, 3.0f);
++    uint32_t b = add_box(&w,  0.5f, 3.0f);
++
++    tmb_joint j;
++    memset(&j, 0, sizeof(j));
++    j.kind = TMB_JOINT_DISTANCE;
++    j.a = a;
++    j.b = b;
++    j.rest_length = 1.0f;
++    tmb_world_add_joint(&w, &j);
++    CHECK(w.joint_count == 1);
++
++    /* Remove body a: joint should be evicted. */
++    tmb_world_remove_body(&w, a);
++    CHECK(w.joint_count == 0);
++    CHECK(j_validate(&w) == 0);
++
++    step_n(&w, 5);
++    CHECK(j_validate(&w) == 0);
++
++    tmb_world_free(&w);
++    return 0;
++}
++
++/* Remove the non-endpoint body so swap-pop patches the joint index. */
++static int test_joint_remap_after_swap_pop(void)
++{
++    tmb_world w = make_world();
++    add_floor(&w);
++    uint32_t a = add_box(&w, -0.5f, 3.0f);  /* body 1 */
++    uint32_t b = add_box(&w,  0.5f, 3.0f);  /* body 2 */
++    uint32_t c = add_box(&w,  1.5f, 3.0f);  /* body 3 */
++
++    /* Joint between a (1) and c (3). */
++    tmb_joint j;
++    memset(&j, 0, sizeof(j));
++    j.kind = TMB_JOINT_REVOLUTE;
++    j.a = a;
++    j.b = c;
++    tmb_world_add_joint(&w, &j);
++    CHECK(w.joint_count == 1);
++
++    /* Remove b (2); c (3=last) moves to slot 2.
++     * Joint's j->b=3 must be patched to 2. */
++    tmb_world_remove_body(&w, b);
++    CHECK(w.joint_count == 1);
++    CHECK(j_validate(&w) == 0);
++
++    step_n(&w, 5);
++    CHECK(j_validate(&w) == 0);
++
++    tmb_world_free(&w);
++    return 0;
++}
++
++/* Combined: multiple joints and xjoints, repeated removals. */
++static int test_mixed_joints_removals(void)
++{
++    tmb_world w = make_world();
++    add_floor(&w);
++    uint32_t ids[5];
++    for (int k = 0; k < 5; k++)
++        ids[k] = add_box(&w, (float)k - 2.0f, 3.0f);
++
++    /* Add a mix of joint types. */
++    {
++        tmb_joint j;
++        memset(&j, 0, sizeof(j));
++        j.kind = TMB_JOINT_DISTANCE;
++        j.a = ids[0]; j.b = ids[2]; j.rest_length = 2.0f;
++        tmb_world_add_joint(&w, &j);
++    }
++    {
++        tmb_xjoint xj;
++        tmb_xjoint_weld(&xj, ids[1], ids[3]);
++        tmb_world_add_xjoint(&w, &xj);
++    }
++    {
++        tmb_xjoint xj;
++        tmb_xjoint_weld(&xj, ids[2], ids[4]);
++        tmb_world_add_xjoint(&w, &xj);
++    }
++
++    step_n(&w, 3);
++    CHECK(j_validate(&w) == 0);
++    CHECK(xj_validate(&w) == 0);
++
++    /* Remove the body at the center of the weld chain. */
++    tmb_world_remove_body(&w, ids[2]);
++    CHECK(j_validate(&w) == 0);
++    CHECK(xj_validate(&w) == 0);
++
++    step_n(&w, 5);
++    CHECK(j_validate(&w) == 0);
++    CHECK(xj_validate(&w) == 0);
++
++    /* Drain all but the floor. */
++    while (tmb_world_body_count(&w) > 1) {
++        tmb_world_remove_body(&w, 1);
++        CHECK(j_validate(&w) == 0);
++        CHECK(xj_validate(&w) == 0);
++    }
++
++    tmb_world_free(&w);
++    return 0;
++}
++
++int main(void)
++{
++    int r = 0;
++    r |= test_xjoint_remove_endpoint();
++    r |= test_xjoint_remap_moved_endpoint();
++    r |= test_xjoint_multi_remove();
++    r |= test_joint_remove_endpoint();
++    r |= test_joint_remap_after_swap_pop();
++    r |= test_mixed_joints_removals();
++    TT_DONE();
++}

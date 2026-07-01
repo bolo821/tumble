@@ -1,0 +1,60 @@
+/tmp/fuzz_build12/world_ops_fuzzer: Running 1 inputs 1 time(s) each.
+=================================================================
+==1710877==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x61f000000dac at pc 0x56531bea6dc8 bp 0x7ffe460a1860 sp 0x7ffe460a1858
+READ of size 4 at 0x61f000000dac thread T0
+    #0 0x56531bea6dc7 in tmb_body_sync /root/bolo/fenrir/Fenrir/tumble/src/body.c:41:39
+    #1 0x56531bee7fac in tmb_xjoint_prepare /root/bolo/fenrir/Fenrir/tumble/src/joints_ext.c:97:5
+    #2 0x56531bf6013e in tmb_world_step /root/bolo/fenrir/Fenrir/tumble/src/world.c:170:9
+    #3 0x56531bf62117 in LLVMFuzzerTestOneInput /root/bolo/fenrir/Fenrir/tumble/fuzz/world_ops_fuzzer.c:94:17
+    #4 0x56531bdcb423 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) (/tmp/fuzz_build12/world_ops_fuzzer+0xe3423) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
+    #5 0x56531bdb519f in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) (/tmp/fuzz_build12/world_ops_fuzzer+0xcd19f) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
+    #6 0x56531bdbaef6 in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) (/tmp/fuzz_build12/world_ops_fuzzer+0xd2ef6) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
+    #7 0x56531bde4d12 in main (/tmp/fuzz_build12/world_ops_fuzzer+0xfcd12) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
+    #8 0x7f12e540ed8f  (/lib/x86_64-linux-gnu/libc.so.6+0x29d8f) (BuildId: 095c7ba148aeca81668091f718047078d57efddb)
+    #9 0x7f12e540ee3f in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x29e3f) (BuildId: 095c7ba148aeca81668091f718047078d57efddb)
+    #10 0x56531bdafa64 in _start (/tmp/fuzz_build12/world_ops_fuzzer+0xc7a64) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
+
+0x61f000000dac is located 12 bytes to the right of 3360-byte region [0x61f000000080,0x61f000000da0)
+allocated by thread T0 here:
+    #0 0x56531be67ec6 in __interceptor_realloc (/tmp/fuzz_build12/world_ops_fuzzer+0x17fec6) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
+    #1 0x56531bf5cfe3 in tmb_world_remove_body /root/bolo/fenrir/Fenrir/tumble/src/world.c:56:36
+    #2 0x56531bf621eb in LLVMFuzzerTestOneInput /root/bolo/fenrir/Fenrir/tumble/fuzz/world_ops_fuzzer.c:106:17
+    #3 0x56531bdcb423 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) (/tmp/fuzz_build12/world_ops_fuzzer+0xe3423) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
+    #4 0x56531bdb519f in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) (/tmp/fuzz_build12/world_ops_fuzzer+0xcd19f) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
+    #5 0x56531bdbaef6 in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) (/tmp/fuzz_build12/world_ops_fuzzer+0xd2ef6) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
+    #6 0x56531bde4d12 in main (/tmp/fuzz_build12/world_ops_fuzzer+0xfcd12) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
+    #7 0x7f12e540ed8f  (/lib/x86_64-linux-gnu/libc.so.6+0x29d8f) (BuildId: 095c7ba148aeca81668091f718047078d57efddb)
+
+SUMMARY: AddressSanitizer: heap-buffer-overflow /root/bolo/fenrir/Fenrir/tumble/src/body.c:41:39 in tmb_body_sync
+Shadow bytes around the buggy address:
+  0x0c3e7fff8160: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x0c3e7fff8170: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x0c3e7fff8180: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x0c3e7fff8190: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x0c3e7fff81a0: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+=>0x0c3e7fff81b0: 00 00 00 00 fa[fa]fa fa fa fa fa fa fa fa fa fa
+  0x0c3e7fff81c0: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x0c3e7fff81d0: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x0c3e7fff81e0: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x0c3e7fff81f0: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x0c3e7fff8200: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+Shadow byte legend (one shadow byte represents 8 application bytes):
+  Addressable:           00
+  Partially addressable: 01 02 03 04 05 06 07 
+  Heap left redzone:       fa
+  Freed heap region:       fd
+  Stack left redzone:      f1
+  Stack mid redzone:       f2
+  Stack right redzone:     f3
+  Stack after return:      f5
+  Stack use after scope:   f8
+  Global redzone:          f9
+  Global init order:       f6
+  Poisoned by user:        f7
+  Container overflow:      fc
+  Array cookie:            ac
+  Intra object redzone:    bb
+  ASan internal:           fe
+  Left alloca redzone:     ca
+  Right alloca redzone:    cb
+==1710877==ABORTING
