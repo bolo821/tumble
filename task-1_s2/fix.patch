@@ -1,0 +1,383 @@
+diff --git a/include/tumble/warmstart.h b/include/tumble/warmstart.h
+index 64eafb8..d7c876c 100644
+--- a/include/tumble/warmstart.h
++++ b/include/tumble/warmstart.h
+@@ -10,10 +10,16 @@
+ extern "C" {
+ #endif
+ 
+-/* Per-pair warm-start slot. prev points into the slab below. */
++/* Maximum contact points per body pair (manifolds have at most two). */
++#define TMB_WS_MAX_POINTS 2
++
++/* Per-pair warm-start slot. Impulse values are stored directly to avoid
++ * pointer aliasing when the backing allocation is resized. */
+ typedef struct {
+-    uint64_t pair;       /* packed (lo<<32|hi) body pair; 0 = empty */
+-    tmb_contact *prev;   /* pointer into slab — valid only while slab unmodified */
++    uint64_t pair;                     /* packed (lo<<32|hi) body pair; 0 = empty */
++    float    ni[TMB_WS_MAX_POINTS];    /* saved normal impulses, one per contact point */
++    float    ti[TMB_WS_MAX_POINTS];    /* saved tangent impulses, one per contact point */
++    uint8_t  count;                    /* number of valid impulse entries */
+ } tmb_ws_slot;
+ 
+ /* Contact impulse warm-start cache.  Speeds convergence by carrying the last
+@@ -26,10 +32,6 @@ typedef struct {
+     tmb_ws_slot *table;   /* open-address hash table (power-of-2 capacity) */
+     size_t table_cap;
+     size_t table_count;
+-
+-    tmb_contact *slab;    /* contiguous block of saved tmb_contact copies */
+-    size_t slab_count;
+-    size_t slab_cap;
+ } tmb_ws_cache;
+ 
+ void tmb_ws_cache_init(tmb_ws_cache *c);
+diff --git a/src/contact_events.c b/src/contact_events.c
+index bdc99fb..241cbc3 100644
+--- a/src/contact_events.c
++++ b/src/contact_events.c
+@@ -85,6 +85,10 @@ size_t tmb_contact_tracker_update(tmb_contact_tracker *t, tmb_world *w)
+         if (!push_cur(t, key))
+             return 0;
+     }
++    if (t->cur_count == 0) {
++        t->prev_count = 0;
++        return 0;
++    }
+     qsort(t->cur, t->cur_count, sizeof(uint64_t), cmp_u64);
+     /* unique */
+     size_t uniq = 0;
+diff --git a/src/warmstart.c b/src/warmstart.c
+index 8549a0e..8d4e035 100644
+--- a/src/warmstart.c
++++ b/src/warmstart.c
+@@ -11,7 +11,6 @@ void tmb_ws_cache_init(tmb_ws_cache *c)
+ void tmb_ws_cache_free(tmb_ws_cache *c)
+ {
+     free(c->table);
+-    free(c->slab);
+     tmb_ws_cache_init(c);
+ }
+ 
+@@ -83,9 +82,6 @@ static tmb_ws_slot *ws_find(const tmb_ws_cache *c, uint64_t pair)
+ 
+ void tmb_ws_store(tmb_ws_cache *c, const tmb_world *w)
+ {
+-    /* Reset the slab index so we overwrite stale copies from last step. */
+-    c->slab_count = 0;
+-
+     /* Clear the hash table occupancy so stale pairs are not carried forward. */
+     if (c->table_cap)
+         memset(c->table, 0, c->table_cap * sizeof(*c->table));
+@@ -99,25 +95,13 @@ void tmb_ws_store(tmb_ws_cache *c, const tmb_world *w)
+         if (!slot)
+             continue;
+ 
+-        /* Record where this contact will land in the slab.
+-         * NOTE: the slab may be reallocated below if it is full, which would
+-         * free the block that prev currently points into. */
+-        slot->prev = &c->slab[c->slab_count];
+-
+-        if (c->slab_count == c->slab_cap) {
+-            size_t nc = c->slab_cap ? c->slab_cap * 2 : 4;
+-            tmb_contact *ns =
+-                (tmb_contact *)realloc(c->slab, nc * sizeof(*ns));
+-            if (!ns) {
+-                slot->prev = NULL;
+-                continue;
+-            }
+-            /* slab moved; slot->prev still points into the old block */
+-            c->slab = ns;
+-            c->slab_cap = nc;
++        /* Store impulse values directly in the slot so no external allocation
++         * is needed and no pointer aliasing can arise during resizing. */
++        if (slot->count < TMB_WS_MAX_POINTS) {
++            uint8_t k = slot->count++;
++            slot->ni[k] = cur->normal_impulse;
++            slot->ti[k] = cur->tangent_impulse;
+         }
+-
+-        c->slab[c->slab_count++] = *cur;
+     }
+ }
+ 
+@@ -125,13 +109,26 @@ void tmb_ws_apply(const tmb_ws_cache *c, tmb_world *w)
+ {
+     if (!c->table_cap)
+         return;
++
++    /* Track how many contacts we have matched for each cached pair so that
++     * the first current contact gets ni[0]/ti[0], the second gets ni[1]/ti[1],
++     * matching the order in which tmb_ws_store recorded them. */
+     for (size_t i = 0; i < w->contact_count; i++) {
+         tmb_contact *cur = &w->contacts[i];
+         uint64_t pair = ws_pack(cur->a, cur->b);
+         const tmb_ws_slot *slot = ws_find(c, pair);
+-        if (slot && slot->prev) {
+-            cur->normal_impulse  = slot->prev->normal_impulse;
+-            cur->tangent_impulse = slot->prev->tangent_impulse;
++        if (!slot || slot->count == 0)
++            continue;
++        /* Count how many earlier contacts in this step share the same pair so
++         * we can index into the slot's saved values correctly. */
++        uint8_t idx = 0;
++        for (size_t j = 0; j < i; j++) {
++            if (ws_pack(w->contacts[j].a, w->contacts[j].b) == pair)
++                idx++;
++        }
++        if (idx < slot->count) {
++            cur->normal_impulse  = slot->ni[idx];
++            cur->tangent_impulse = slot->ti[idx];
+         }
+     }
+ }
+diff --git a/tests/test_warmstart.c b/tests/test_warmstart.c
+new file mode 100644
+index 0000000..cee06e2
+--- /dev/null
++++ b/tests/test_warmstart.c
+@@ -0,0 +1,243 @@
++#include "tumble/warmstart.h"
++#include "tumble/contact.h"
++#include "tumble/world.h"
++#include "tttest.h"
++
++#include <string.h>
++#include <stdint.h>
++
++/* ------------------------------------------------------------------ helpers */
++
++static tmb_contact make_contact(uint32_t a, uint32_t b,
++                                float ni, float ti)
++{
++    tmb_contact c;
++    memset(&c, 0, sizeof(c));
++    c.a = a;
++    c.b = b;
++    c.normal_impulse  = ni;
++    c.tangent_impulse = ti;
++    c.sibling = TMB_NO_SIBLING;
++    return c;
++}
++
++static void world_set_contacts(tmb_world *w, tmb_contact *arr, size_t n)
++{
++    w->contacts      = arr;
++    w->contact_count = n;
++}
++
++/* ------------------------------------------------------------------ tests */
++
++/* Basic round-trip: store one contact, apply it the next frame. */
++static void test_basic_store_apply(void)
++{
++    tmb_ws_cache c;
++    tmb_ws_cache_init(&c);
++
++    tmb_world w;
++    tmb_world_init(&w);
++
++    tmb_contact prev = make_contact(1, 2, 3.5f, -1.2f);
++    world_set_contacts(&w, &prev, 1);
++    tmb_ws_store(&c, &w);
++
++    /* Next frame: same pair, zeroed impulses — apply should restore them. */
++    tmb_contact cur = make_contact(1, 2, 0.0f, 0.0f);
++    world_set_contacts(&w, &cur, 1);
++    tmb_ws_apply(&c, &w);
++
++    CHECK_NEAR(cur.normal_impulse,  3.5f,  1e-5f);
++    CHECK_NEAR(cur.tangent_impulse, -1.2f, 1e-5f);
++
++    w.contacts = NULL; w.contact_count = 0;
++    tmb_world_free(&w);
++    tmb_ws_cache_free(&c);
++}
++
++/* Pair order independence: (b,a) same pair as (a,b). */
++static void test_pair_symmetry(void)
++{
++    tmb_ws_cache c;
++    tmb_ws_cache_init(&c);
++
++    tmb_world w;
++    tmb_world_init(&w);
++
++    tmb_contact prev = make_contact(7, 3, 2.0f, 0.5f);
++    world_set_contacts(&w, &prev, 1);
++    tmb_ws_store(&c, &w);
++
++    tmb_contact cur = make_contact(3, 7, 0.0f, 0.0f);   /* reversed */
++    world_set_contacts(&w, &cur, 1);
++    tmb_ws_apply(&c, &w);
++
++    CHECK_NEAR(cur.normal_impulse,  2.0f, 1e-5f);
++    CHECK_NEAR(cur.tangent_impulse, 0.5f, 1e-5f);
++
++    w.contacts = NULL; w.contact_count = 0;
++    tmb_world_free(&w);
++    tmb_ws_cache_free(&c);
++}
++
++/* Two-point manifold: both contact points carry forward independently. */
++static void test_two_point_manifold(void)
++{
++    tmb_ws_cache c;
++    tmb_ws_cache_init(&c);
++
++    tmb_world w;
++    tmb_world_init(&w);
++
++    tmb_contact prev[2];
++    prev[0] = make_contact(0, 1, 1.0f, 0.1f);
++    prev[1] = make_contact(0, 1, 2.0f, 0.2f);
++    world_set_contacts(&w, prev, 2);
++    tmb_ws_store(&c, &w);
++
++    tmb_contact cur[2];
++    cur[0] = make_contact(0, 1, 0.0f, 0.0f);
++    cur[1] = make_contact(0, 1, 0.0f, 0.0f);
++    world_set_contacts(&w, cur, 2);
++    tmb_ws_apply(&c, &w);
++
++    CHECK_NEAR(cur[0].normal_impulse,  1.0f, 1e-5f);
++    CHECK_NEAR(cur[0].tangent_impulse, 0.1f, 1e-5f);
++    CHECK_NEAR(cur[1].normal_impulse,  2.0f, 1e-5f);
++    CHECK_NEAR(cur[1].tangent_impulse, 0.2f, 1e-5f);
++
++    w.contacts = NULL; w.contact_count = 0;
++    tmb_world_free(&w);
++    tmb_ws_cache_free(&c);
++}
++
++/* Multiple distinct pairs in the same cache. */
++static void test_multiple_pairs(void)
++{
++    tmb_ws_cache c;
++    tmb_ws_cache_init(&c);
++
++    tmb_world w;
++    tmb_world_init(&w);
++
++    tmb_contact prev[3];
++    prev[0] = make_contact(0, 1, 1.0f, 0.0f);
++    prev[1] = make_contact(2, 3, 4.0f, 0.5f);
++    prev[2] = make_contact(5, 6, 7.0f, 0.7f);
++    world_set_contacts(&w, prev, 3);
++    tmb_ws_store(&c, &w);
++
++    tmb_contact cur[3];
++    cur[0] = make_contact(5, 6, 0.0f, 0.0f);
++    cur[1] = make_contact(0, 1, 0.0f, 0.0f);
++    cur[2] = make_contact(2, 3, 0.0f, 0.0f);
++    world_set_contacts(&w, cur, 3);
++    tmb_ws_apply(&c, &w);
++
++    CHECK_NEAR(cur[0].normal_impulse,  7.0f, 1e-5f);
++    CHECK_NEAR(cur[1].normal_impulse,  1.0f, 1e-5f);
++    CHECK_NEAR(cur[2].normal_impulse,  4.0f, 1e-5f);
++    CHECK_NEAR(cur[2].tangent_impulse, 0.5f, 1e-5f);
++
++    w.contacts = NULL; w.contact_count = 0;
++    tmb_world_free(&w);
++    tmb_ws_cache_free(&c);
++}
++
++/* Pair disappears for a frame then reappears — should get zero (stale cleared). */
++static void test_pair_disappear_reappear(void)
++{
++    tmb_ws_cache c;
++    tmb_ws_cache_init(&c);
++
++    tmb_world w;
++    tmb_world_init(&w);
++
++    /* Frame 1: pair (1,2) present. */
++    tmb_contact f1 = make_contact(1, 2, 9.0f, 3.0f);
++    world_set_contacts(&w, &f1, 1);
++    tmb_ws_store(&c, &w);
++
++    /* Frame 2: pair (1,2) absent — store with empty world. */
++    world_set_contacts(&w, NULL, 0);
++    tmb_ws_store(&c, &w);
++
++    /* Frame 3: pair (1,2) reappears — should NOT get stale impulses. */
++    tmb_contact f3 = make_contact(1, 2, 0.0f, 0.0f);
++    world_set_contacts(&w, &f3, 1);
++    tmb_ws_apply(&c, &w);
++
++    CHECK_NEAR(f3.normal_impulse,  0.0f, 1e-5f);
++    CHECK_NEAR(f3.tangent_impulse, 0.0f, 1e-5f);
++
++    w.contacts = NULL; w.contact_count = 0;
++    tmb_world_free(&w);
++    tmb_ws_cache_free(&c);
++}
++
++/* Multiple simulation steps: impulses accumulate across frames correctly. */
++static void test_multiple_steps(void)
++{
++    tmb_ws_cache c;
++    tmb_ws_cache_init(&c);
++
++    tmb_world w;
++    tmb_world_init(&w);
++
++    float ni = 0.0f, ti = 0.0f;
++    for (int step = 0; step < 5; step++) {
++        /* Simulate solver settling: each step ni grows by 1. */
++        ni += 1.0f;
++        ti += 0.5f;
++        tmb_contact prev = make_contact(10, 20, ni, ti);
++        world_set_contacts(&w, &prev, 1);
++        tmb_ws_store(&c, &w);
++
++        tmb_contact cur = make_contact(10, 20, 0.0f, 0.0f);
++        world_set_contacts(&w, &cur, 1);
++        tmb_ws_apply(&c, &w);
++
++        CHECK_NEAR(cur.normal_impulse,  ni, 1e-5f);
++        CHECK_NEAR(cur.tangent_impulse, ti, 1e-5f);
++    }
++
++    w.contacts = NULL; w.contact_count = 0;
++    tmb_world_free(&w);
++    tmb_ws_cache_free(&c);
++}
++
++/* Apply on an empty cache does nothing (no crash). */
++static void test_apply_empty_cache(void)
++{
++    tmb_ws_cache c;
++    tmb_ws_cache_init(&c);
++
++    tmb_world w;
++    tmb_world_init(&w);
++
++    tmb_contact cur = make_contact(0, 1, 5.0f, 2.0f);
++    world_set_contacts(&w, &cur, 1);
++    tmb_ws_apply(&c, &w);   /* must not crash */
++
++    /* Impulses unchanged since no prior store. */
++    CHECK_NEAR(cur.normal_impulse,  5.0f, 1e-5f);
++    CHECK_NEAR(cur.tangent_impulse, 2.0f, 1e-5f);
++
++    w.contacts = NULL; w.contact_count = 0;
++    tmb_world_free(&w);
++    tmb_ws_cache_free(&c);
++}
++
++/* ------------------------------------------------------------------ main */
++
++int main(void)
++{
++    test_basic_store_apply();
++    test_pair_symmetry();
++    test_two_point_manifold();
++    test_multiple_pairs();
++    test_pair_disappear_reappear();
++    test_multiple_steps();
++    test_apply_empty_cache();
++    TT_DONE();
++}

@@ -1,0 +1,1 @@
+The warmstart cache stores a pointer into its contact slab before checking whether the slab needs to grow. When the 5th unique contact pair triggers a realloc, the old slab is freed but the pointer is not updated, causing a heap-use-after-free read on the next simulation step.
