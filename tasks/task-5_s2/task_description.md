@@ -1,0 +1,1 @@
+Heap buffer overflow in the state recorder's frame-capture routine (`src/recorder.c`), triggered after capturing several hundred frames, when the frame buffer is grown with a miscalculated size and a new frame is written past its end.

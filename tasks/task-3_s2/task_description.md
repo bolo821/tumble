@@ -1,0 +1,1 @@
+Heap buffer overflow in the contact solver's prepare step (`src/solver.c`), triggered when a scene accumulates more than roughly 37 simultaneous contacts, causing a per-contact cache to be written one element past its allocation.

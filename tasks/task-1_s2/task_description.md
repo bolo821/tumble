@@ -1,0 +1,1 @@
+Use-after-free in the sleep-island subsystem (`src/island_sleep.c`), triggered when a body is removed from an island after the island has gone to sleep and another body is subsequently removed, causing a freed island record to be read during wake-up.

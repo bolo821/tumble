@@ -1,0 +1,1 @@
+Use-after-free in the joint prepare step (`src/solver.c`), triggered when an unrelated body is removed between simulation steps: the body array is reallocated while a joint still holds a cached pointer into the freed buffer.

@@ -1,0 +1,1 @@
+Out-of-bounds read in the extended-joint prepare step (`src/joints_ext.c`), triggered when a body connected by a weld joint is removed and the world is stepped again, causing a stale body index to read past the body array.
