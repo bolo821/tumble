@@ -1,4 +1,6 @@
 #include "tumble/tumble.h"
+#include "tumble/buffer.h"
+#include "tumble/scene_parse.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -18,34 +20,12 @@
  * backslash is dropped and the following line is appended, so one logical
  * directive can be spread over several source lines for readability.
  *
+ * Line assembly and tokenization are handled by the bounded reader in
+ * scene_parse.c, so no fixed-size buffer can be overrun regardless of how the
+ * input is split across continued lines.
+ *
  * Defensive: every field is checked, unknown directives are skipped, counts
  * are capped. */
-
-#define MAXTOK 80
-
-typedef struct {
-    char *tok[MAXTOK];
-    int n;
-} line_toks;
-
-static int is_sep(char c) { return c == ' ' || c == '\t' || c == '\r'; }
-
-static void tokenize(char *line, line_toks *lt)
-{
-    lt->n = 0;
-    char *p = line;
-    while (*p && lt->n < MAXTOK) {
-        while (*p && is_sep(*p))
-            p++;
-        if (!*p)
-            break;
-        lt->tok[lt->n++] = p;
-        while (*p && !is_sep(*p))
-            p++;
-        if (*p)
-            *p++ = '\0';
-    }
-}
 
 static int body_type_of(const char *s) /* default dynamic */
 {
@@ -67,7 +47,7 @@ static tmb_err add_with(tmb_world *w, tmb_shape shape, int type, float x,
     return tmb_world_add_body(w, &b) == UINT32_MAX ? TMB_ERR_OOM : TMB_OK;
 }
 
-static tmb_err handle(tmb_world *w, line_toks *lt)
+static tmb_err handle(tmb_world *w, const tmb_tokens *lt)
 {
     if (lt->n == 0 || lt->tok[0][0] == '#')
         return TMB_OK;
@@ -110,7 +90,8 @@ static tmb_err handle(tmb_world *w, line_toks *lt)
         int count = atoi(lt->tok[3]);
         if (count < 3 || count > TMB_MAX_POLY_VERTS)
             return TMB_OK;
-        if (lt->n < 4 + 2 * count)
+        size_t need = (size_t)4 + (size_t)2 * (size_t)count;
+        if (lt->n < need)
             return TMB_ERR_PARSE;
         tmb_vec2 v[TMB_MAX_POLY_VERTS];
         for (int i = 0; i < count; i++)
@@ -119,9 +100,8 @@ static tmb_err handle(tmb_world *w, line_toks *lt)
         tmb_shape s;
         if (tmb_shape_polygon(&s, v, count) != TMB_OK)
             return TMB_OK; /* skip a degenerate polygon */
-        int type = (lt->n > 4 + 2 * count)
-                       ? body_type_of(lt->tok[4 + 2 * count])
-                       : TMB_BODY_DYNAMIC;
+        int type = (lt->n > need) ? body_type_of(lt->tok[need])
+                                  : TMB_BODY_DYNAMIC;
         return add_with(w, s, type, (float)atof(lt->tok[1]),
                         (float)atof(lt->tok[2]), 0.0f, 1.0f);
     }
@@ -144,44 +124,39 @@ static tmb_err handle(tmb_world *w, line_toks *lt)
 
 tmb_err tmb_load_scene_text(const char *text, size_t len, tmb_world *out)
 {
-    char buf[4096];
-    size_t pos = 0;
-    while (pos < len) {
-        /* Assemble one logical line, following backslash continuations. */
-        size_t total = 0;
-        int continued;
-        do {
-            size_t start = pos;
-            size_t eol = pos;
-            while (eol < len && text[eol] != '\n')
-                eol++;
-            size_t n = eol - start;
-            pos = eol + 1;
+    tmb_line_reader r;
+    tmb_line_reader_init(&r, text, len);
 
-            /* Drop a trailing CR from CRLF line endings. */
-            if (n > 0 && text[start + n - 1] == '\r')
-                n--;
+    tmb_buf line;
+    tmb_buf_init(&line);
+    tmb_tokens toks;
+    tmb_tokens_init(&toks);
 
-            /* A trailing backslash continues onto the next physical line; the
-             * backslash itself is not part of the logical line. */
-            continued = (n > 0 && text[start + n - 1] == '\\');
-            if (continued)
-                n--;
+    tmb_err ret = TMB_OK;
+    for (;;) {
+        tmb_line_status st = tmb_line_reader_next(&r, &line);
+        if (st == TMB_LINE_END)
+            break;
+        if (st == TMB_LINE_OVERFLOW)
+            continue; /* skip an over-long logical line */
 
-            /* Copy this segment onto the end of the logical line. A segment
-             * longer than the buffer cannot be represented, so it is dropped. */
-            if (n < sizeof(buf)) {
-                memcpy(buf + total, text + start, n);
-                total += n;
-            }
-        } while (continued && pos <= len);
-
-        buf[total] = '\0';
-        line_toks lt;
-        tokenize(buf, &lt);
-        tmb_err e = handle(out, &lt);
-        if (e == TMB_ERR_OOM)
-            return e;
+        char *cstr = tmb_buf_cstr(&line);
+        if (!cstr) {
+            ret = TMB_ERR_OOM;
+            break;
+        }
+        if (tmb_tokens_split(&toks, cstr) != 0) {
+            ret = TMB_ERR_OOM;
+            break;
+        }
+        tmb_err e = handle(out, &toks);
+        if (e == TMB_ERR_OOM) {
+            ret = e;
+            break;
+        }
     }
-    return TMB_OK;
+
+    tmb_tokens_free(&toks);
+    tmb_buf_free(&line);
+    return ret;
 }

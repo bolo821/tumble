@@ -24,6 +24,13 @@ int tmb_buf_write(tmb_buf *b, const void *src, size_t n);
 int tmb_buf_puts(tmb_buf *b, const char *s);
 int tmb_buf_printf(tmb_buf *b, const char *fmt, ...);
 
+/* Drop the current contents but keep the allocation for reuse. Also clears a
+ * sticky OOM flag so a buffer can be reused after a failed grow. */
+void tmb_buf_reset(tmb_buf *b);
+/* Ensure a trailing NUL and return the contents as a C string, or NULL if the
+ * terminator could not be reserved. The NUL is not counted in `len`. */
+char *tmb_buf_cstr(tmb_buf *b);
+
 #ifdef __cplusplus
 }
 #endif

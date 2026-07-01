@@ -70,6 +70,20 @@ int tmb_buf_write(tmb_buf *b, const void *src, size_t n)
 
 int tmb_buf_puts(tmb_buf *b, const char *s) { return tmb_buf_write(b, s, strlen(s)); }
 
+void tmb_buf_reset(tmb_buf *b)
+{
+    b->len = 0;
+    b->oom = 0;
+}
+
+char *tmb_buf_cstr(tmb_buf *b)
+{
+    if (tmb_buf_reserve(b, 1) != 0)
+        return NULL;
+    b->data[b->len] = '\0';
+    return (char *)b->data;
+}
+
 int tmb_buf_printf(tmb_buf *b, const char *fmt, ...)
 {
     va_list ap, ap2;
