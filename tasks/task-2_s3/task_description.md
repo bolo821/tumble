@@ -1,0 +1,1 @@
+Use-after-free in the point quadtree (`src/quadtree.c`): `tmb_quadtree_clear` frees a subdivided node's child subtrees but leaves the parent's `divided` flag set and its `kids[]` pointers dangling, so the next `tmb_quadtree_query` or insert after a clear traverses freed nodes.

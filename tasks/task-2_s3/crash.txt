@@ -1,0 +1,78 @@
+INFO: Running with entropic power schedule (0xFF, 100).
+INFO: Seed: 4281504004
+INFO: Loaded 1 modules   (13262 inline 8-bit counters): 13262 [0x557fbaafad60, 0x557fbaafe12e), 
+INFO: Loaded 1 PC tables (13262 PCs): 13262 [0x557fbaafe130,0x557fbab31e10), 
+/tmp/s3_t2_buggy/f: Running 1 inputs 1 time(s) each.
+Running: tasks/task-2_s3/poc.bin
+=================================================================
+==1909342==ERROR: AddressSanitizer: heap-use-after-free on address 0x60e000000200 at pc 0x557fbaa33d32 bp 0x7ffd5bbcf830 sp 0x7ffd5bbcf828
+READ of size 8 at 0x60e000000200 thread T0
+    #0 0x557fbaa33d31 in query_node /root/bolo/fenrir/Fenrir/tumble/src/quadtree.c:99:16
+    #1 0x557fbaa33c21 in query_node /root/bolo/fenrir/Fenrir/tumble/src/quadtree.c:110:13
+    #2 0x557fbaa33291 in tmb_quadtree_query /root/bolo/fenrir/Fenrir/tumble/src/quadtree.c:117:5
+    #3 0x557fbaa8330f in LLVMFuzzerTestOneInput /root/bolo/fenrir/Fenrir/tumble/fuzz/quadtree_fuzzer.c:38:5
+    #4 0x557fba902423 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) (/tmp/s3_t2_buggy/f+0xcc423) (BuildId: 38c7770aa81a0d87699814b821dfa310c34722f5)
+    #5 0x557fba8ec19f in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) (/tmp/s3_t2_buggy/f+0xb619f) (BuildId: 38c7770aa81a0d87699814b821dfa310c34722f5)
+    #6 0x557fba8f1ef6 in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) (/tmp/s3_t2_buggy/f+0xbbef6) (BuildId: 38c7770aa81a0d87699814b821dfa310c34722f5)
+    #7 0x557fba91bd12 in main (/tmp/s3_t2_buggy/f+0xe5d12) (BuildId: 38c7770aa81a0d87699814b821dfa310c34722f5)
+    #8 0x7f022aefed8f  (/lib/x86_64-linux-gnu/libc.so.6+0x29d8f) (BuildId: 095c7ba148aeca81668091f718047078d57efddb)
+    #9 0x7f022aefee3f in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x29e3f) (BuildId: 095c7ba148aeca81668091f718047078d57efddb)
+    #10 0x557fba8e6a64 in _start (/tmp/s3_t2_buggy/f+0xb0a64) (BuildId: 38c7770aa81a0d87699814b821dfa310c34722f5)
+
+0x60e000000200 is located 0 bytes inside of 152-byte region [0x60e000000200,0x60e000000298)
+freed by thread T0 here:
+    #0 0x557fba99e7f2 in __interceptor_free (/tmp/s3_t2_buggy/f+0x1687f2) (BuildId: 38c7770aa81a0d87699814b821dfa310c34722f5)
+    #1 0x557fbaa30b78 in free_node /root/bolo/fenrir/Fenrir/tumble/src/quadtree.c:21:5
+    #2 0x557fbaa30d45 in tmb_quadtree_clear /root/bolo/fenrir/Fenrir/tumble/src/quadtree.c:40:9
+    #3 0x557fbaa832b7 in LLVMFuzzerTestOneInput /root/bolo/fenrir/Fenrir/tumble/fuzz/quadtree_fuzzer.c:31:5
+    #4 0x557fba902423 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) (/tmp/s3_t2_buggy/f+0xcc423) (BuildId: 38c7770aa81a0d87699814b821dfa310c34722f5)
+    #5 0x557fba8ec19f in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) (/tmp/s3_t2_buggy/f+0xb619f) (BuildId: 38c7770aa81a0d87699814b821dfa310c34722f5)
+    #6 0x557fba8f1ef6 in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) (/tmp/s3_t2_buggy/f+0xbbef6) (BuildId: 38c7770aa81a0d87699814b821dfa310c34722f5)
+    #7 0x557fba91bd12 in main (/tmp/s3_t2_buggy/f+0xe5d12) (BuildId: 38c7770aa81a0d87699814b821dfa310c34722f5)
+    #8 0x7f022aefed8f  (/lib/x86_64-linux-gnu/libc.so.6+0x29d8f) (BuildId: 095c7ba148aeca81668091f718047078d57efddb)
+
+previously allocated by thread T0 here:
+    #0 0x557fba99ec88 in __interceptor_calloc (/tmp/s3_t2_buggy/f+0x168c88) (BuildId: 38c7770aa81a0d87699814b821dfa310c34722f5)
+    #1 0x557fbaa31fde in subdivide /root/bolo/fenrir/Fenrir/tumble/src/quadtree.c:54:37
+    #2 0x557fbaa31fde in insert_node /root/bolo/fenrir/Fenrir/tumble/src/quadtree.c:78:24
+    #3 0x557fbaa31152 in tmb_quadtree_insert /root/bolo/fenrir/Fenrir/tumble/src/quadtree.c:90:14
+    #4 0x557fbaa8321f in LLVMFuzzerTestOneInput /root/bolo/fenrir/Fenrir/tumble/fuzz/quadtree_fuzzer.c:27:9
+    #5 0x557fba902423 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) (/tmp/s3_t2_buggy/f+0xcc423) (BuildId: 38c7770aa81a0d87699814b821dfa310c34722f5)
+    #6 0x557fba8ec19f in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) (/tmp/s3_t2_buggy/f+0xb619f) (BuildId: 38c7770aa81a0d87699814b821dfa310c34722f5)
+    #7 0x557fba8f1ef6 in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) (/tmp/s3_t2_buggy/f+0xbbef6) (BuildId: 38c7770aa81a0d87699814b821dfa310c34722f5)
+    #8 0x557fba91bd12 in main (/tmp/s3_t2_buggy/f+0xe5d12) (BuildId: 38c7770aa81a0d87699814b821dfa310c34722f5)
+    #9 0x7f022aefed8f  (/lib/x86_64-linux-gnu/libc.so.6+0x29d8f) (BuildId: 095c7ba148aeca81668091f718047078d57efddb)
+
+SUMMARY: AddressSanitizer: heap-use-after-free /root/bolo/fenrir/Fenrir/tumble/src/quadtree.c:99:16 in query_node
+Shadow bytes around the buggy address:
+  0x0c1c7fff7ff0: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x0c1c7fff8000: fa fa fa fa fa fa fa fa 00 00 00 00 00 00 00 00
+  0x0c1c7fff8010: 00 00 00 00 00 00 00 00 00 00 00 00 fa fa fa fa
+  0x0c1c7fff8020: fa fa fa fa 00 00 00 00 00 00 00 00 00 00 00 00
+  0x0c1c7fff8030: 00 00 00 00 00 00 00 fa fa fa fa fa fa fa fa fa
+=>0x0c1c7fff8040:[fd]fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd
+  0x0c1c7fff8050: fd fd fd fa fa fa fa fa fa fa fa fa fd fd fd fd
+  0x0c1c7fff8060: fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd fa
+  0x0c1c7fff8070: fa fa fa fa fa fa fa fa fd fd fd fd fd fd fd fd
+  0x0c1c7fff8080: fd fd fd fd fd fd fd fd fd fd fd fa fa fa fa fa
+  0x0c1c7fff8090: fa fa fa fa fd fd fd fd fd fd fd fd fd fd fd fd
+Shadow byte legend (one shadow byte represents 8 application bytes):
+  Addressable:           00
+  Partially addressable: 01 02 03 04 05 06 07 
+  Heap left redzone:       fa
+  Freed heap region:       fd
+  Stack left redzone:      f1
+  Stack mid redzone:       f2
+  Stack right redzone:     f3
+  Stack after return:      f5
+  Stack use after scope:   f8
+  Global redzone:          f9
+  Global init order:       f6
+  Poisoned by user:        f7
+  Container overflow:      fc
+  Array cookie:            ac
+  Intra object redzone:    bb
+  ASan internal:           fe
+  Left alloca redzone:     ca
+  Right alloca redzone:    cb
+==1909342==ABORTING
