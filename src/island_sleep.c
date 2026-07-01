@@ -231,10 +231,10 @@ void tmb_sleep_update(tmb_world *w, float dt)
         tmb_island_rec *rec = (tmb_island_rec *)malloc(sizeof(*rec));
         if (!rec)
             continue;
-        /* Preallocate exactly the member slots needed; for islands larger
-         * than two bodies the root representative is tracked separately, so
-         * the allocation can be one slot shorter than the full count. */
-        rec->members = (uint32_t *)malloc(sizeof(uint32_t) * (size_t)(count > 2 ? count - 1 : count));
+        /* Preallocate exactly the member slots needed; multi-body islands
+         * carry an implicit root representative so the allocation can be
+         * one slot shorter than the member count for the common case. */
+        rec->members = (uint32_t *)malloc(sizeof(uint32_t) * (size_t)(count > 1 ? count - 1 : count));
         if (!rec->members) {
             free(rec);
             continue;
