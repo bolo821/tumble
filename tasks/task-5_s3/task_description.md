@@ -1,0 +1,1 @@
+Out-of-bounds write in `tmb_grid_occupancy` (`src/grid.c`): body cell coordinates are folded into the heatmap with a signed `%`, which keeps the dividend's sign, so any body with a negative cell coordinate (anything below or left of the origin) produces a negative bucket index and writes before the start of the `counts` array.

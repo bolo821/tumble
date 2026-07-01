@@ -1,0 +1,62 @@
+INFO: Running with entropic power schedule (0xFF, 100).
+INFO: Seed: 3550051516
+INFO: Loaded 1 modules   (13296 inline 8-bit counters): 13296 [0x55557a991f10, 0x55557a995300), 
+INFO: Loaded 1 PC tables (13296 PCs): 13296 [0x55557a995300,0x55557a9c9200), 
+/tmp/s3_t5_buggy/f: Running 1 inputs 1 time(s) each.
+Running: tasks/task-5_s3/poc.bin
+=================================================================
+==1935502==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x611000000024 at pc 0x55557a895f4f bp 0x7ffde0432940 sp 0x7ffde0432938
+READ of size 4 at 0x611000000024 thread T0
+    #0 0x55557a895f4e in tmb_grid_occupancy /root/bolo/fenrir/Fenrir/tumble/src/grid.c:174:31
+    #1 0x55557a91aae4 in LLVMFuzzerTestOneInput /root/bolo/fenrir/Fenrir/tumble/fuzz/grid_fuzzer.c:42:13
+    #2 0x55557a799423 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) (/tmp/s3_t5_buggy/f+0xcc423) (BuildId: 0d416c0113bc0f4610c0ace34d13f460ce6765e5)
+    #3 0x55557a78319f in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) (/tmp/s3_t5_buggy/f+0xb619f) (BuildId: 0d416c0113bc0f4610c0ace34d13f460ce6765e5)
+    #4 0x55557a788ef6 in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) (/tmp/s3_t5_buggy/f+0xbbef6) (BuildId: 0d416c0113bc0f4610c0ace34d13f460ce6765e5)
+    #5 0x55557a7b2d12 in main (/tmp/s3_t5_buggy/f+0xe5d12) (BuildId: 0d416c0113bc0f4610c0ace34d13f460ce6765e5)
+    #6 0x7f1a8658cd8f  (/lib/x86_64-linux-gnu/libc.so.6+0x29d8f) (BuildId: 095c7ba148aeca81668091f718047078d57efddb)
+    #7 0x7f1a8658ce3f in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x29e3f) (BuildId: 095c7ba148aeca81668091f718047078d57efddb)
+    #8 0x55557a77da64 in _start (/tmp/s3_t5_buggy/f+0xb0a64) (BuildId: 0d416c0113bc0f4610c0ace34d13f460ce6765e5)
+
+0x611000000024 is located 28 bytes to the left of 256-byte region [0x611000000040,0x611000000140)
+allocated by thread T0 here:
+    #0 0x55557a835a9e in malloc (/tmp/s3_t5_buggy/f+0x168a9e) (BuildId: 0d416c0113bc0f4610c0ace34d13f460ce6765e5)
+    #1 0x55557a91aac5 in LLVMFuzzerTestOneInput /root/bolo/fenrir/Fenrir/tumble/fuzz/grid_fuzzer.c:40:30
+    #2 0x55557a799423 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) (/tmp/s3_t5_buggy/f+0xcc423) (BuildId: 0d416c0113bc0f4610c0ace34d13f460ce6765e5)
+    #3 0x55557a78319f in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) (/tmp/s3_t5_buggy/f+0xb619f) (BuildId: 0d416c0113bc0f4610c0ace34d13f460ce6765e5)
+    #4 0x55557a788ef6 in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) (/tmp/s3_t5_buggy/f+0xbbef6) (BuildId: 0d416c0113bc0f4610c0ace34d13f460ce6765e5)
+    #5 0x55557a7b2d12 in main (/tmp/s3_t5_buggy/f+0xe5d12) (BuildId: 0d416c0113bc0f4610c0ace34d13f460ce6765e5)
+    #6 0x7f1a8658cd8f  (/lib/x86_64-linux-gnu/libc.so.6+0x29d8f) (BuildId: 095c7ba148aeca81668091f718047078d57efddb)
+
+SUMMARY: AddressSanitizer: heap-buffer-overflow /root/bolo/fenrir/Fenrir/tumble/src/grid.c:174:31 in tmb_grid_occupancy
+Shadow bytes around the buggy address:
+  0x0c227fff7fb0: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x0c227fff7fc0: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x0c227fff7fd0: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x0c227fff7fe0: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x0c227fff7ff0: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+=>0x0c227fff8000: fa fa fa fa[fa]fa fa fa 00 00 00 00 00 00 00 00
+  0x0c227fff8010: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x0c227fff8020: 00 00 00 00 00 00 00 00 fa fa fa fa fa fa fa fa
+  0x0c227fff8030: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x0c227fff8040: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x0c227fff8050: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+Shadow byte legend (one shadow byte represents 8 application bytes):
+  Addressable:           00
+  Partially addressable: 01 02 03 04 05 06 07 
+  Heap left redzone:       fa
+  Freed heap region:       fd
+  Stack left redzone:      f1
+  Stack mid redzone:       f2
+  Stack right redzone:     f3
+  Stack after return:      f5
+  Stack use after scope:   f8
+  Global redzone:          f9
+  Global init order:       f6
+  Poisoned by user:        f7
+  Container overflow:      fc
+  Array cookie:            ac
+  Intra object redzone:    bb
+  ASan internal:           fe
+  Left alloca redzone:     ca
+  Right alloca redzone:    cb
+==1935502==ABORTING
