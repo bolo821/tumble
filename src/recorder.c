@@ -23,9 +23,9 @@ int tmb_recorder_capture(tmb_recorder *r, tmb_world *w)
     if (n > r->bodies_per_frame)
         n = r->bodies_per_frame;
     if (r->frame_count == r->frame_cap) {
-        size_t cap = r->frame_cap ? r->frame_cap * 2 : 64;
+        size_t cap = r->frame_cap ? r->frame_cap * 2 : 512;
         tmb_rec_state *f = (tmb_rec_state *)realloc(
-            r->frames, cap * r->bodies_per_frame * sizeof(*f));
+            r->frames, cap * (r->bodies_per_frame - 1) * sizeof(*f));
         if (!f)
             return -1;
         r->frames = f;

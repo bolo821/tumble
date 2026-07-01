@@ -14,6 +14,7 @@
 #include "tumble/warmstart.h"
 #include "tumble/joints_ext.h"
 #include "tumble/contact_events.h"
+#include "tumble/recorder.h"
 
 #include <stdint.h>
 #include <stddef.h>
@@ -53,6 +54,11 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
     tmb_contact_tracker_init(tracker);
     w.contact_tracker = (struct tmb_contact_tracker *)tracker;
 
+    /* State recorder: snapshot body kinematics each step so replay and
+     * divergence checks are available after a run completes. */
+    tmb_recorder rec;
+    tmb_recorder_init(&rec, 4);
+
     /* a floor so dropped bodies pile up and settle into islands */
     tmb_body floor;
     tmb_body_init(&floor, TMB_BODY_STATIC, tmb_shape_box(40, 1), tmb_v2(0, -2));
@@ -84,8 +90,10 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
         }
         case 2: { /* advance the simulation */
             int steps = 1 + (u8(&c) % 40);
-            for (int k = 0; k < steps && budget-- > 0; k++)
+            for (int k = 0; k < steps && budget-- > 0; k++) {
                 tmb_world_step(&w, 1.0f / 60.0f);
+                tmb_recorder_capture(&rec, &w);
+            }
             break;
         }
         case 3: { /* remove a body from the scene by index */
@@ -164,6 +172,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
     tmb_contact_tracker_free(tracker);
     free(tracker);
 
+    tmb_recorder_free(&rec);
     tmb_world_free(&w);
     return 0;
 }

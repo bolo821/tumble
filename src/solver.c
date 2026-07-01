@@ -1,6 +1,7 @@
 #include "tumble/solver.h"
 
 #include <math.h>
+#include <stdlib.h>
 
 #define TMB_SLOP 0.005f
 #define TMB_REST_THRESHOLD 1.0f
@@ -42,6 +43,26 @@ void tmb_solver_prepare(tmb_world *w, float dt)
 
         c->normal_impulse = 0.0f;
         c->tangent_impulse = 0.0f;
+    }
+
+    /* Refresh the per-contact normal-impulse mirror used by the cross-pair
+     * lookup in solve_velocity.  The cache is only maintained when there are
+     * enough contacts to make cross-pair look-ahead worthwhile; single or
+     * isolated contact pairs are handled directly in the solver loop. */
+    if (w->contact_count > 4) {
+        size_t need = w->contact_count - 1;
+        if (need > w->contact_nrm_cap) {
+            float *nc =
+                (float *)realloc(w->contact_nrm_cache, need * sizeof(float));
+            if (nc) {
+                w->contact_nrm_cache = nc;
+                w->contact_nrm_cap   = need;
+            }
+        }
+        if (w->contact_nrm_cache) {
+            for (size_t i = 0; i < w->contact_count; i++)
+                w->contact_nrm_cache[i] = w->contacts[i].normal_impulse;
+        }
     }
 }
 
@@ -111,8 +132,11 @@ void tmb_joints_prepare(tmb_world *w, float dt)
     (void)dt;
     for (size_t i = 0; i < w->joint_count; i++) {
         tmb_joint *j = &w->joints[i];
-        tmb_body *A = &w->bodies[j->a];
-        tmb_body *B = &w->bodies[j->b];
+        /* On warm paths the body pointer cache lets us skip the indexed lookup
+         * and go directly to the body.  The cache is refreshed at the end of
+         * this loop so the next invocation benefits from it. */
+        tmb_body *A = j->body_a_ptr ? j->body_a_ptr : &w->bodies[j->a];
+        tmb_body *B = j->body_b_ptr ? j->body_b_ptr : &w->bodies[j->b];
         j->ra = tmb_xform_dir(A->xf, j->anchor_a);
         j->rb = tmb_xform_dir(B->xf, j->anchor_b);
         tmb_vec2 pa = tmb_v2_add(A->pos, j->ra);
@@ -128,6 +152,9 @@ void tmb_joints_prepare(tmb_world *w, float dt)
             j->mass = k > 0.0f ? 1.0f / k : 0.0f;
         }
         j->impulse = tmb_v2(0, 0);
+        /* Refresh the body pointer cache for the next prepare invocation. */
+        j->body_a_ptr = &w->bodies[j->a];
+        j->body_b_ptr = &w->bodies[j->b];
     }
 }
 

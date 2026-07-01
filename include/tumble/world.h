@@ -55,6 +55,11 @@ typedef struct {
 
     struct tmb_ws_cache *warmstart; /* contact impulse warm-start cache */
 
+    /* Per-step mirror of contact normal impulses for cross-iteration lookup.
+     * Allocated once in solver_prepare and freed with the world. */
+    float *contact_nrm_cache;
+    size_t contact_nrm_cap;
+
     struct tmb_contact_tracker *contact_tracker; /* in-step begin/persist/end events */
 } tmb_world;
 

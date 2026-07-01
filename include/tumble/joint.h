@@ -1,6 +1,7 @@
 #ifndef TUMBLE_JOINT_H
 #define TUMBLE_JOINT_H
 
+#include "tumble/body.h"
 #include "tumble/vec2.h"
 #include <stdint.h>
 
@@ -25,6 +26,11 @@ typedef struct {
     tmb_vec2 normal;
     float mass;
     tmb_vec2 impulse;
+    /* Body pointer cache: populated at the end of joints_prepare so that the
+     * following prepare call avoids redundant index dereferences on warm paths.
+     * NULL until the first prepare invocation. */
+    tmb_body *body_a_ptr;
+    tmb_body *body_b_ptr;
 } tmb_joint;
 
 #ifdef __cplusplus

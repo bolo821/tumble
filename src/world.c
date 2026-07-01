@@ -29,6 +29,8 @@ void tmb_world_free(tmb_world *w)
         tmb_ws_cache_free((tmb_ws_cache *)w->warmstart);
         free(w->warmstart);
     }
+    free(w->contact_nrm_cache);
+    w->contact_nrm_cap = 0;
     free(w->bodies);
     free(w->contacts);
     free(w->joints);
