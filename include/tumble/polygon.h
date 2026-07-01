@@ -24,6 +24,10 @@ int tmb_poly_clip(const tmb_vec2 *v, int n, tmb_vec2 normal, float offset,
  * returns the hull vertex count, CCW. */
 int tmb_convex_hull(const tmb_vec2 *pts, int n, tmb_vec2 *hull);
 
+/* Convex hull of a point cloud returned in a freshly allocated array (caller
+ * frees). *out_count receives the hull vertex count. NULL on empty/failure. */
+tmb_vec2 *tmb_convex_hull_alloc(const tmb_vec2 *pts, int n, int *out_count);
+
 #ifdef __cplusplus
 }
 #endif

@@ -127,3 +127,24 @@ int tmb_convex_hull(const tmb_vec2 *pts, int n, tmb_vec2 *hull)
     free(s);
     return k > 1 ? k - 1 : k;
 }
+
+/* Convex hull of a point cloud, returned in a freshly allocated array that the
+ * caller owns and frees. *out_count receives the number of hull vertices.
+ * A convenience wrapper around tmb_convex_hull for callers that would rather
+ * not size a scratch buffer themselves. */
+tmb_vec2 *tmb_convex_hull_alloc(const tmb_vec2 *pts, int n, int *out_count)
+{
+    if (out_count)
+        *out_count = 0;
+    if (n < 1)
+        return NULL;
+    /* A convex hull has no more vertices than the input point set, so size the
+     * output to the point count. */
+    tmb_vec2 *hull = (tmb_vec2 *)malloc((size_t)n * sizeof(*hull));
+    if (!hull)
+        return NULL;
+    int m = tmb_convex_hull(pts, n, hull);
+    if (out_count)
+        *out_count = m;
+    return hull;
+}
