@@ -276,34 +276,48 @@ void tmb_sleep_on_remove(tmb_world *w, uint32_t i, uint32_t last)
         tmb_island_rec *old_rec = s->body_rec[i];
 
         if (old_rec->count > 1) {
-            /* Preserve the island without the departing body: build a reduced
-             * copy of the record with the evicted member removed, then redirect
-             * all surviving members to the new record. */
+            /* Preserve the island without the departing body.  Allocate a NEW
+             * record with its own independent members array and copy every
+             * surviving member into it.
+             *
+             * A struct copy (*new_rec = *old_rec) must NOT be used here: it
+             * would alias new_rec->members to old_rec->members, so the
+             * rec_free(old_rec) below would leave new_rec->members pointing at
+             * freed memory and wake_island would later read through it. */
             tmb_island_rec *new_rec =
                 (tmb_island_rec *)malloc(sizeof(*new_rec));
             if (new_rec) {
-                *new_rec = *old_rec;
+                int survivor_cap = old_rec->count - 1;
+                if (survivor_cap < 1)
+                    survivor_cap = 1;
+                new_rec->members =
+                    (uint32_t *)malloc(sizeof(uint32_t) * (size_t)survivor_cap);
+                if (!new_rec->members) {
+                    free(new_rec);
+                    new_rec = NULL;
+                } else {
+                    new_rec->cap = survivor_cap;
+                    new_rec->count = 0;
 
-                /* Remove body i from the member list via swap-pop. */
-                for (int k = 0; k < new_rec->count; k++) {
-                    if (new_rec->members[k] == i) {
-                        new_rec->members[k] =
-                            new_rec->members[--new_rec->count];
-                        break;
+                    /* Copy every member except the departing body i. */
+                    for (int k = 0; k < old_rec->count; k++) {
+                        if (old_rec->members[k] != i)
+                            new_rec->members[new_rec->count++] =
+                                old_rec->members[k];
                     }
+
+                    /* Redirect surviving members to the new record. */
+                    for (int k = 0; k < new_rec->count; k++) {
+                        uint32_t m = new_rec->members[k];
+                        if (m < s->cap)
+                            s->body_rec[m] = new_rec;
+                    }
+
+                    if (s->sleeping_count > 0)
+                        s->sleeping_count--;
+
+                    owned_push(s, new_rec);
                 }
-
-                /* Redirect surviving members to the new record. */
-                for (int k = 0; k < new_rec->count; k++) {
-                    uint32_t m = new_rec->members[k];
-                    if (m < s->cap)
-                        s->body_rec[m] = new_rec;
-                }
-
-                if (s->sleeping_count > 0)
-                    s->sleeping_count--;
-
-                owned_push(s, new_rec);
             }
         } else {
             if (s->sleeping_count > 0)
@@ -318,7 +332,10 @@ void tmb_sleep_on_remove(tmb_world *w, uint32_t i, uint32_t last)
         s->still[i] = 0.0f;
     }
 
-    /* Migrate the moved body's sleep state into the freed slot (swap-pop). */
+    /* Migrate the moved body's sleep state into the freed slot (swap-pop).
+     * world.c copies bodies[last] -> bodies[i] after this returns, so any
+     * island record that still names 'last' as a member must be updated to
+     * name 'i' instead, or wake_island would later iterate a stale index. */
     if (i != last && last < s->cap) {
         s->body_rec[i] = s->body_rec[last];
         s->asleep[i] = s->asleep[last];
@@ -326,6 +343,16 @@ void tmb_sleep_on_remove(tmb_world *w, uint32_t i, uint32_t last)
         s->body_rec[last] = NULL;
         s->asleep[last] = 0;
         s->still[last] = 0.0f;
+
+        tmb_island_rec *moved_rec = s->body_rec[i];
+        if (moved_rec) {
+            for (int k = 0; k < moved_rec->count; k++) {
+                if (moved_rec->members[k] == last) {
+                    moved_rec->members[k] = i;
+                    break;
+                }
+            }
+        }
     }
 }
 
