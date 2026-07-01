@@ -24,8 +24,12 @@ int tmb_recorder_capture(tmb_recorder *r, tmb_world *w)
         n = r->bodies_per_frame;
     if (r->frame_count == r->frame_cap) {
         size_t cap = r->frame_cap ? r->frame_cap * 2 : 512;
+        /* Each frame occupies bodies_per_frame slots, so the buffer must hold
+         * cap * bodies_per_frame states.  The old multiplier (bodies_per_frame
+         * - 1) under-allocated by one row per frame and overran the buffer
+         * once enough frames had been captured. */
         tmb_rec_state *f = (tmb_rec_state *)realloc(
-            r->frames, cap * (r->bodies_per_frame - 1) * sizeof(*f));
+            r->frames, cap * r->bodies_per_frame * sizeof(*f));
         if (!f)
             return -1;
         r->frames = f;
