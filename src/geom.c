@@ -65,6 +65,100 @@ int tmb_circumcircle(tmb_vec2 a, tmb_vec2 b, tmb_vec2 c, tmb_vec2 *center,
     return 0;
 }
 
+tmb_vec2 tmb_closest_point_on_segment(tmb_vec2 p, tmb_vec2 a, tmb_vec2 b,
+                                      float *t_out)
+{
+    tmb_vec2 ab = tmb_v2_sub(b, a);
+    float len2 = tmb_v2_dot(ab, ab);
+    float t = 0.0f;
+    if (len2 > 1e-20f) {
+        t = tmb_v2_dot(tmb_v2_sub(p, a), ab) / len2;
+        if (t < 0.0f) t = 0.0f;
+        if (t > 1.0f) t = 1.0f;
+    }
+    if (t_out)
+        *t_out = t;
+    return tmb_v2_add(a, tmb_v2_scale(ab, t));
+}
+
+/* Closest point on a triangle to p, via Voronoi-region tests (Ericson, RTCD).
+ * Reports which feature the closest point lies on so callers such as the GJK
+ * simplex reducer can discard the vertices that do not contribute. */
+tmb_vec2 tmb_closest_point_on_triangle(tmb_vec2 p, tmb_vec2 a, tmb_vec2 b,
+                                       tmb_vec2 c, tmb_tri_region *region)
+{
+    tmb_tri_region reg = TMB_TRI_INSIDE;
+    tmb_vec2 result;
+
+    tmb_vec2 ab = tmb_v2_sub(b, a);
+    tmb_vec2 ac = tmb_v2_sub(c, a);
+    tmb_vec2 ap = tmb_v2_sub(p, a);
+    float d1 = tmb_v2_dot(ab, ap);
+    float d2 = tmb_v2_dot(ac, ap);
+    if (d1 <= 0.0f && d2 <= 0.0f) {
+        reg = TMB_TRI_VERT_A;
+        result = a;
+        goto done;
+    }
+
+    tmb_vec2 bp = tmb_v2_sub(p, b);
+    float d3 = tmb_v2_dot(ab, bp);
+    float d4 = tmb_v2_dot(ac, bp);
+    if (d3 >= 0.0f && d4 <= d3) {
+        reg = TMB_TRI_VERT_B;
+        result = b;
+        goto done;
+    }
+
+    float vc = d1 * d4 - d3 * d2;
+    if (vc <= 0.0f && d1 >= 0.0f && d3 <= 0.0f) {
+        float v = d1 / (d1 - d3);
+        reg = TMB_TRI_EDGE_AB;
+        result = tmb_v2_add(a, tmb_v2_scale(ab, v));
+        goto done;
+    }
+
+    tmb_vec2 cp = tmb_v2_sub(p, c);
+    float d5 = tmb_v2_dot(ab, cp);
+    float d6 = tmb_v2_dot(ac, cp);
+    if (d6 >= 0.0f && d5 <= d6) {
+        reg = TMB_TRI_VERT_C;
+        result = c;
+        goto done;
+    }
+
+    float vb = d5 * d2 - d1 * d6;
+    if (vb <= 0.0f && d2 >= 0.0f && d6 <= 0.0f) {
+        float w = d2 / (d2 - d6);
+        reg = TMB_TRI_EDGE_CA;
+        result = tmb_v2_add(a, tmb_v2_scale(ac, w));
+        goto done;
+    }
+
+    float va = d3 * d6 - d5 * d4;
+    if (va <= 0.0f && (d4 - d3) >= 0.0f && (d5 - d6) >= 0.0f) {
+        float w = (d4 - d3) / ((d4 - d3) + (d5 - d6));
+        reg = TMB_TRI_EDGE_BC;
+        result = tmb_v2_add(b, tmb_v2_scale(tmb_v2_sub(c, b), w));
+        goto done;
+    }
+
+    /* p projects inside the triangle */
+    {
+        float denom = 1.0f / (va + vb + vc);
+        float v = vb * denom;
+        float w = vc * denom;
+        reg = TMB_TRI_INSIDE;
+        result = tmb_v2_add(a, tmb_v2_add(tmb_v2_scale(ab, v),
+                                          tmb_v2_scale(ac, w)));
+    }
+
+done:
+    if (region)
+        *region = reg;
+    return result;
+}
+
 tmb_vec2 tmb_project_point_line(tmb_vec2 p, tmb_vec2 a, tmb_vec2 dir)
 {
     float len2 = tmb_v2_dot(dir, dir);
