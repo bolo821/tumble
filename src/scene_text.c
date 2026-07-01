@@ -14,6 +14,10 @@
  *   joint revolute A B AX AY BX BY
  *   # comment
  *
+ * A physical line ending in a backslash is continued onto the next line: the
+ * backslash is dropped and the following line is appended, so one logical
+ * directive can be spread over several source lines for readability.
+ *
  * Defensive: every field is checked, unknown directives are skipped, counts
  * are capped. */
 
@@ -143,20 +147,41 @@ tmb_err tmb_load_scene_text(const char *text, size_t len, tmb_world *out)
     char buf[4096];
     size_t pos = 0;
     while (pos < len) {
-        size_t eol = pos;
-        while (eol < len && text[eol] != '\n')
-            eol++;
-        size_t n = eol - pos;
-        if (n < sizeof(buf)) {
-            memcpy(buf, text + pos, n);
-            buf[n] = '\0';
-            line_toks lt;
-            tokenize(buf, &lt);
-            tmb_err e = handle(out, &lt);
-            if (e == TMB_ERR_OOM)
-                return e;
-        }
-        pos = eol + 1;
+        /* Assemble one logical line, following backslash continuations. */
+        size_t total = 0;
+        int continued;
+        do {
+            size_t start = pos;
+            size_t eol = pos;
+            while (eol < len && text[eol] != '\n')
+                eol++;
+            size_t n = eol - start;
+            pos = eol + 1;
+
+            /* Drop a trailing CR from CRLF line endings. */
+            if (n > 0 && text[start + n - 1] == '\r')
+                n--;
+
+            /* A trailing backslash continues onto the next physical line; the
+             * backslash itself is not part of the logical line. */
+            continued = (n > 0 && text[start + n - 1] == '\\');
+            if (continued)
+                n--;
+
+            /* Copy this segment onto the end of the logical line. A segment
+             * longer than the buffer cannot be represented, so it is dropped. */
+            if (n < sizeof(buf)) {
+                memcpy(buf + total, text + start, n);
+                total += n;
+            }
+        } while (continued && pos <= len);
+
+        buf[total] = '\0';
+        line_toks lt;
+        tokenize(buf, &lt);
+        tmb_err e = handle(out, &lt);
+        if (e == TMB_ERR_OOM)
+            return e;
     }
     return TMB_OK;
 }
