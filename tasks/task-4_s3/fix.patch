@@ -1,0 +1,311 @@
+diff --git a/include/tumble/geom.h b/include/tumble/geom.h
+index 468b887..3278c7a 100644
+--- a/include/tumble/geom.h
++++ b/include/tumble/geom.h
+@@ -23,6 +23,29 @@ void tmb_barycentric(tmb_vec2 p, tmb_vec2 a, tmb_vec2 b, tmb_vec2 c, float *u,
+ int tmb_circumcircle(tmb_vec2 a, tmb_vec2 b, tmb_vec2 c, tmb_vec2 *center,
+                      float *radius);
+ 
++/* Closest point to p on segment [a,b]. When t is non-NULL it receives the
++ * parameter in [0,1] such that the result is a + t*(b-a). */
++tmb_vec2 tmb_closest_point_on_segment(tmb_vec2 p, tmb_vec2 a, tmb_vec2 b,
++                                      float *t);
++
++/* Feature of a triangle nearest a query point (used by GJK simplex
++ * reduction). */
++typedef enum {
++    TMB_TRI_VERT_A = 0,
++    TMB_TRI_VERT_B,
++    TMB_TRI_VERT_C,
++    TMB_TRI_EDGE_AB,
++    TMB_TRI_EDGE_BC,
++    TMB_TRI_EDGE_CA,
++    TMB_TRI_INSIDE
++} tmb_tri_region;
++
++/* Closest point to p on triangle (a,b,c). When region is non-NULL it receives
++ * the Voronoi feature the closest point lies on; TMB_TRI_INSIDE means p is
++ * inside the triangle (closest point == p). */
++tmb_vec2 tmb_closest_point_on_triangle(tmb_vec2 p, tmb_vec2 a, tmb_vec2 b,
++                                       tmb_vec2 c, tmb_tri_region *region);
++
+ /* Project p onto the infinite line through a with direction dir. */
+ tmb_vec2 tmb_project_point_line(tmb_vec2 p, tmb_vec2 a, tmb_vec2 dir);
+ /* Reflect v about a unit normal n. */
+diff --git a/src/distance.c b/src/distance.c
+index 3892d09..8512c4c 100644
+--- a/src/distance.c
++++ b/src/distance.c
+@@ -1,4 +1,5 @@
+ #include "tumble/distance.h"
++#include "tumble/geom.h"
+ 
+ #include <math.h>
+ 
+@@ -76,29 +77,30 @@ float tmb_shape_distance(const tmb_shape *sa, tmb_xform xa, const tmb_shape *sb,
+             float wa, wb;
+             tmb_vec2 c = closest_seg(s[0].p, s[1].p, &wa, &wb);
+             dir = tmb_v2_neg(c);
+-        } else { /* triangle: reduce to the edge closest to the origin */
+-            /* Find which of the triangle's three edges the origin is closest
+-             * to; the search then continues from that edge. */
+-            int best_edge = 0;
+-            float best_dsq = 1e30f;
+-            for (int e = 0; e < 3; e++) {
+-                float wa, wb;
+-                tmb_vec2 c =
+-                    closest_seg(s[e].p, s[e + 1].p, &wa, &wb);
+-                float dsq = tmb_v2_len_sq(c);
+-                if (dsq < best_dsq) {
+-                    best_dsq = dsq;
+-                    best_edge = e;
+-                }
++        } else { /* triangle: find the feature of the simplex closest to O */
++            tmb_tri_region region;
++            tmb_vec2 c = tmb_closest_point_on_triangle(
++                tmb_v2(0, 0), s[0].p, s[1].p, s[2].p, &region);
++            if (region == TMB_TRI_INSIDE)
++                return 0.0f; /* origin enclosed -> shapes overlap */
++
++            /* Reduce the simplex to the closest feature, then keep searching
++             * toward the origin from it. Copy through a scratch simplex so the
++             * reassignment cannot alias. */
++            simplex_pt r[3];
++            r[0] = s[0];
++            r[1] = s[1];
++            r[2] = s[2];
++            switch (region) {
++            case TMB_TRI_VERT_A: s[0] = r[0]; n = 1; break;
++            case TMB_TRI_VERT_B: s[0] = r[1]; n = 1; break;
++            case TMB_TRI_VERT_C: s[0] = r[2]; n = 1; break;
++            case TMB_TRI_EDGE_AB: s[0] = r[0]; s[1] = r[1]; n = 2; break;
++            case TMB_TRI_EDGE_BC: s[0] = r[1]; s[1] = r[2]; n = 2; break;
++            case TMB_TRI_EDGE_CA: s[0] = r[2]; s[1] = r[0]; n = 2; break;
++            default: n = 2; break;
+             }
+-            /* A 3-point simplex that encloses the origin means the shapes
+-             * overlap. */
+-            float area = tmb_v2_cross(tmb_v2_sub(s[1].p, s[0].p),
+-                                      tmb_v2_sub(s[2].p, s[0].p));
+-            if (fabsf(area) < 1e-9f)
+-                break;
+-            (void)best_edge;
+-            return 0.0f; /* treat as overlapping */
++            dir = tmb_v2_neg(c);
+         }
+         if (tmb_v2_len_sq(dir) < 1e-12f)
+             return 0.0f; /* origin on the boundary */
+diff --git a/src/geom.c b/src/geom.c
+index bbba60b..228d8e4 100644
+--- a/src/geom.c
++++ b/src/geom.c
+@@ -65,6 +65,100 @@ int tmb_circumcircle(tmb_vec2 a, tmb_vec2 b, tmb_vec2 c, tmb_vec2 *center,
+     return 0;
+ }
+ 
++tmb_vec2 tmb_closest_point_on_segment(tmb_vec2 p, tmb_vec2 a, tmb_vec2 b,
++                                      float *t_out)
++{
++    tmb_vec2 ab = tmb_v2_sub(b, a);
++    float len2 = tmb_v2_dot(ab, ab);
++    float t = 0.0f;
++    if (len2 > 1e-20f) {
++        t = tmb_v2_dot(tmb_v2_sub(p, a), ab) / len2;
++        if (t < 0.0f) t = 0.0f;
++        if (t > 1.0f) t = 1.0f;
++    }
++    if (t_out)
++        *t_out = t;
++    return tmb_v2_add(a, tmb_v2_scale(ab, t));
++}
++
++/* Closest point on a triangle to p, via Voronoi-region tests (Ericson, RTCD).
++ * Reports which feature the closest point lies on so callers such as the GJK
++ * simplex reducer can discard the vertices that do not contribute. */
++tmb_vec2 tmb_closest_point_on_triangle(tmb_vec2 p, tmb_vec2 a, tmb_vec2 b,
++                                       tmb_vec2 c, tmb_tri_region *region)
++{
++    tmb_tri_region reg = TMB_TRI_INSIDE;
++    tmb_vec2 result;
++
++    tmb_vec2 ab = tmb_v2_sub(b, a);
++    tmb_vec2 ac = tmb_v2_sub(c, a);
++    tmb_vec2 ap = tmb_v2_sub(p, a);
++    float d1 = tmb_v2_dot(ab, ap);
++    float d2 = tmb_v2_dot(ac, ap);
++    if (d1 <= 0.0f && d2 <= 0.0f) {
++        reg = TMB_TRI_VERT_A;
++        result = a;
++        goto done;
++    }
++
++    tmb_vec2 bp = tmb_v2_sub(p, b);
++    float d3 = tmb_v2_dot(ab, bp);
++    float d4 = tmb_v2_dot(ac, bp);
++    if (d3 >= 0.0f && d4 <= d3) {
++        reg = TMB_TRI_VERT_B;
++        result = b;
++        goto done;
++    }
++
++    float vc = d1 * d4 - d3 * d2;
++    if (vc <= 0.0f && d1 >= 0.0f && d3 <= 0.0f) {
++        float v = d1 / (d1 - d3);
++        reg = TMB_TRI_EDGE_AB;
++        result = tmb_v2_add(a, tmb_v2_scale(ab, v));
++        goto done;
++    }
++
++    tmb_vec2 cp = tmb_v2_sub(p, c);
++    float d5 = tmb_v2_dot(ab, cp);
++    float d6 = tmb_v2_dot(ac, cp);
++    if (d6 >= 0.0f && d5 <= d6) {
++        reg = TMB_TRI_VERT_C;
++        result = c;
++        goto done;
++    }
++
++    float vb = d5 * d2 - d1 * d6;
++    if (vb <= 0.0f && d2 >= 0.0f && d6 <= 0.0f) {
++        float w = d2 / (d2 - d6);
++        reg = TMB_TRI_EDGE_CA;
++        result = tmb_v2_add(a, tmb_v2_scale(ac, w));
++        goto done;
++    }
++
++    float va = d3 * d6 - d5 * d4;
++    if (va <= 0.0f && (d4 - d3) >= 0.0f && (d5 - d6) >= 0.0f) {
++        float w = (d4 - d3) / ((d4 - d3) + (d5 - d6));
++        reg = TMB_TRI_EDGE_BC;
++        result = tmb_v2_add(b, tmb_v2_scale(tmb_v2_sub(c, b), w));
++        goto done;
++    }
++
++    /* p projects inside the triangle */
++    {
++        float denom = 1.0f / (va + vb + vc);
++        float v = vb * denom;
++        float w = vc * denom;
++        reg = TMB_TRI_INSIDE;
++        result = tmb_v2_add(a, tmb_v2_add(tmb_v2_scale(ab, v),
++                                          tmb_v2_scale(ac, w)));
++    }
++
++done:
++    if (region)
++        *region = reg;
++    return result;
++}
++
+ tmb_vec2 tmb_project_point_line(tmb_vec2 p, tmb_vec2 a, tmb_vec2 dir)
+ {
+     float len2 = tmb_v2_dot(dir, dir);
+diff --git a/tests/test_distance.c b/tests/test_distance.c
+new file mode 100644
+index 0000000..60af942
+--- /dev/null
++++ b/tests/test_distance.c
+@@ -0,0 +1,103 @@
++/* Regression tests for GJK distance and the geometry closest-point helpers.
++ *
++ * The distance query must handle the full 3-point simplex (formed when shapes
++ * overlap or nearly touch) without reading past the simplex, and must return
++ * sensible separations for disjoint shapes. All tests run under ASan/UBSan. */
++
++#include "tumble/distance.h"
++#include "tumble/geom.h"
++#include "tumble/shape.h"
++#include "tumble/transform.h"
++
++#include "tttest.h"
++#include <math.h>
++
++static int approx(float a, float b, float eps) { return fabsf(a - b) < eps; }
++
++static int test_segment_closest(void)
++{
++    tmb_vec2 a = tmb_v2(0, 0), b = tmb_v2(10, 0);
++    float t;
++    tmb_vec2 c = tmb_closest_point_on_segment(tmb_v2(5, 3), a, b, &t);
++    CHECK(approx(c.x, 5, 1e-4f) && approx(c.y, 0, 1e-4f));
++    CHECK(approx(t, 0.5f, 1e-4f));
++    c = tmb_closest_point_on_segment(tmb_v2(-4, 1), a, b, &t);
++    CHECK(approx(t, 0.0f, 1e-4f)); /* clamped to a */
++    c = tmb_closest_point_on_segment(tmb_v2(99, 1), a, b, &t);
++    CHECK(approx(t, 1.0f, 1e-4f)); /* clamped to b */
++    (void)c;
++    return 0;
++}
++
++static int test_triangle_closest(void)
++{
++    tmb_vec2 a = tmb_v2(0, 0), b = tmb_v2(4, 0), c = tmb_v2(0, 4);
++    tmb_tri_region reg;
++
++    tmb_vec2 p = tmb_closest_point_on_triangle(tmb_v2(1, 1), a, b, c, &reg);
++    CHECK(reg == TMB_TRI_INSIDE);
++    CHECK(approx(p.x, 1, 1e-4f) && approx(p.y, 1, 1e-4f));
++
++    p = tmb_closest_point_on_triangle(tmb_v2(-3, -3), a, b, c, &reg);
++    CHECK(reg == TMB_TRI_VERT_A);
++
++    p = tmb_closest_point_on_triangle(tmb_v2(2, -2), a, b, c, &reg);
++    CHECK(reg == TMB_TRI_EDGE_AB);
++    CHECK(approx(p.y, 0, 1e-4f));
++    (void)p;
++    return 0;
++}
++
++static float box_gap(float halfw, float sep)
++{
++    /* two axis-aligned unit boxes separated along x by `sep` centre-to-centre */
++    tmb_shape a = tmb_shape_box(halfw, halfw);
++    tmb_shape b = tmb_shape_box(halfw, halfw);
++    tmb_xform xa = tmb_xform_make(tmb_v2(0, 0), 0.0f);
++    tmb_xform xb = tmb_xform_make(tmb_v2(sep, 0), 0.0f);
++    tmb_vec2 pa, pb;
++    return tmb_shape_distance(&a, xa, &b, xb, &pa, &pb);
++}
++
++static int test_distance_separated(void)
++{
++    /* halfwidth 0.5, centres 3 apart -> gap 3 - 0.5 - 0.5 = 2 */
++    CHECK(approx(box_gap(0.5f, 3.0f), 2.0f, 1e-3f));
++    /* centres 1.5 apart -> gap 0.5 */
++    CHECK(approx(box_gap(0.5f, 1.5f), 0.5f, 1e-3f));
++    return 0;
++}
++
++static int test_distance_overlap(void)
++{
++    /* halfwidth 1.0, centres 0.5 apart -> overlapping -> distance 0 */
++    CHECK(approx(box_gap(1.0f, 0.5f), 0.0f, 1e-4f));
++    /* coincident */
++    CHECK(approx(box_gap(1.0f, 0.0f), 0.0f, 1e-4f));
++    return 0;
++}
++
++/* Sweep offsets across the overlap/separation boundary: must never crash and
++ * distance must be monotone-ish (0 while overlapping, growing once apart). */
++static int test_distance_sweep_no_oob(void)
++{
++    for (int i = 0; i <= 40; i++) {
++        float sep = (float)i * 0.1f; /* 0 .. 4 */
++        float d = box_gap(0.5f, sep);
++        CHECK(d >= -1e-4f);
++        if (sep <= 1.0f)
++            CHECK(approx(d, 0.0f, 1e-3f)); /* boxes overlap up to sep=1 */
++    }
++    return 0;
++}
++
++int main(void)
++{
++    int r = 0;
++    r |= test_segment_closest();
++    r |= test_triangle_closest();
++    r |= test_distance_separated();
++    r |= test_distance_overlap();
++    r |= test_distance_sweep_no_oob();
++    TT_DONE();
++}

@@ -1,0 +1,1 @@
+Out-of-bounds read in the GJK distance routine `tmb_shape_distance` (`src/distance.c`): the triangle-simplex branch scans edges as `s[e]` to `s[e+1]` for `e` in 0..2 without wrapping, so the last edge reads `s[3]`, one past the three-element simplex, whenever two shapes overlap enough for GJK to build a full triangle.
