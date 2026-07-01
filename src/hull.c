@@ -1,61 +1,95 @@
 #include "tumble/hull.h"
 
+#include <stdlib.h>
+
 static float cross_o(tmb_vec2 o, tmb_vec2 a, tmb_vec2 b)
 {
     return (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
 }
 
-/* sort indices by (x, then y) without allocating: simple insertion sort over a
- * caller-sized scratch is overkill, so we sort a local copy of the points */
-static void sort_points(tmb_vec2 *p, int n)
+static int cmp_pt(const void *pa, const void *pb)
 {
-    for (int i = 1; i < n; i++) {
-        tmb_vec2 key = p[i];
-        int j = i - 1;
-        while (j >= 0 && (p[j].x > key.x ||
-                          (p[j].x == key.x && p[j].y > key.y))) {
-            p[j + 1] = p[j];
-            j--;
-        }
-        p[j + 1] = key;
+    const tmb_vec2 *a = (const tmb_vec2 *)pa, *b = (const tmb_vec2 *)pb;
+    if (a->x < b->x) return -1;
+    if (a->x > b->x) return 1;
+    if (a->y < b->y) return -1;
+    if (a->y > b->y) return 1;
+    return 0;
+}
+
+/* Single, bounds-safe monotone-chain hull core shared by the hull utilities
+ * and the polygon helpers.
+ *
+ * Andrew's monotone chain writes each chain into a working array whose length
+ * can reach the input count plus the closing vertex; a caller that sized its
+ * destination to exactly the point count (a natural assumption, since the hull
+ * never has *more* vertices than the input) would be overrun by that closing
+ * write. To make the routine safe for any destination size, the chain is built
+ * in an internal scratch buffer and only the first min(count, cap) vertices are
+ * copied out. Coincident points are removed first so degenerate clouds cannot
+ * inflate the vertex count. Returns the number of vertices written to `out`
+ * (never more than `cap`). */
+int tmb_hull_monotone(const tmb_vec2 *pts, int n, tmb_vec2 *out, int cap)
+{
+    if (n <= 0 || cap <= 0 || !out)
+        return 0;
+
+    tmb_vec2 *s = (tmb_vec2 *)malloc((size_t)n * sizeof(*s));
+    if (!s)
+        return 0;
+    for (int i = 0; i < n; i++)
+        s[i] = pts[i];
+    qsort(s, (size_t)n, sizeof(*s), cmp_pt);
+
+    /* Drop coincident points (the array is sorted, so duplicates are adjacent). */
+    int m = 0;
+    for (int i = 0; i < n; i++)
+        if (m == 0 || s[i].x != s[m - 1].x || s[i].y != s[m - 1].y)
+            s[m++] = s[i];
+
+    int written;
+    if (m < 3) {
+        written = m < cap ? m : cap;
+        for (int i = 0; i < written; i++)
+            out[i] = s[i];
+        free(s);
+        return written;
     }
+
+    /* Worst case the chain holds 2*m points before the closing vertex is
+     * dropped; +1 keeps a safe margin. */
+    tmb_vec2 *h = (tmb_vec2 *)malloc((size_t)(2 * m + 1) * sizeof(*h));
+    if (!h) {
+        free(s);
+        return 0;
+    }
+
+    int k = 0;
+    for (int i = 0; i < m; i++) { /* lower hull */
+        while (k >= 2 && cross_o(h[k - 2], h[k - 1], s[i]) <= 0)
+            k--;
+        h[k++] = s[i];
+    }
+    int lower = k + 1;
+    for (int i = m - 2; i >= 0; i--) { /* upper hull */
+        while (k >= lower && cross_o(h[k - 2], h[k - 1], s[i]) <= 0)
+            k--;
+        h[k++] = s[i];
+    }
+    int count = k > 0 ? k - 1 : 0; /* last point repeats the first */
+
+    written = count < cap ? count : cap;
+    for (int i = 0; i < written; i++)
+        out[i] = h[i];
+
+    free(h);
+    free(s);
+    return written;
 }
 
 int tmb_convex_hull_capped(const tmb_vec2 *pts, int n, tmb_vec2 *out, int cap)
 {
-    if (n < 3) {
-        int m = n < cap ? n : cap;
-        for (int i = 0; i < m; i++)
-            out[i] = pts[i];
-        return m;
-    }
-    tmb_vec2 sorted[256];
-    if (n > 256)
-        n = 256;
-    for (int i = 0; i < n; i++)
-        sorted[i] = pts[i];
-    sort_points(sorted, n);
-
-    tmb_vec2 hull[512];
-    int k = 0;
-    /* lower hull */
-    for (int i = 0; i < n; i++) {
-        while (k >= 2 && cross_o(hull[k - 2], hull[k - 1], sorted[i]) <= 0)
-            k--;
-        hull[k++] = sorted[i];
-    }
-    /* upper hull */
-    int lower = k + 1;
-    for (int i = n - 2; i >= 0; i--) {
-        while (k >= lower && cross_o(hull[k - 2], hull[k - 1], sorted[i]) <= 0)
-            k--;
-        hull[k++] = sorted[i];
-    }
-    k--; /* last point equals the first */
-    int m = k < cap ? k : cap;
-    for (int i = 0; i < m; i++)
-        out[i] = hull[i];
-    return m;
+    return tmb_hull_monotone(pts, n, out, cap);
 }
 
 float tmb_polygon_area(const tmb_vec2 *pts, int n)

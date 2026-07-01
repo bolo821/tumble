@@ -11,6 +11,12 @@ extern "C" {
  * The hull (Andrew's monotone chain) is what turns an arbitrary point cloud
  * into a valid convex shape for the collision system. */
 
+/* Bounds-safe monotone-chain hull core. Removes coincident points, builds the
+ * hull in an internal scratch buffer and copies at most `cap` vertices (CCW)
+ * to `out`; returns the number written. Never writes past out[cap-1] for any
+ * input, and handles an arbitrary point count. */
+int tmb_hull_monotone(const tmb_vec2 *pts, int n, tmb_vec2 *out, int cap);
+
 /* Compute the convex hull of `n` input points. Writes up to `cap` hull vertices
  * in counter-clockwise order to `out`; returns the hull vertex count. */
 int tmb_convex_hull_capped(const tmb_vec2 *pts, int n, tmb_vec2 *out, int cap);

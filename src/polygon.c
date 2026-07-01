@@ -1,4 +1,5 @@
 #include "tumble/polygon.h"
+#include "tumble/hull.h"
 
 #include <stdlib.h>
 
@@ -84,48 +85,14 @@ int tmb_poly_clip(const tmb_vec2 *v, int n, tmb_vec2 normal, float offset,
     return m;
 }
 
-static int cmp_v2(const void *pa, const void *pb)
-{
-    const tmb_vec2 *a = (const tmb_vec2 *)pa, *b = (const tmb_vec2 *)pb;
-    if (a->x < b->x) return -1;
-    if (a->x > b->x) return 1;
-    if (a->y < b->y) return -1;
-    if (a->y > b->y) return 1;
-    return 0;
-}
-
 int tmb_convex_hull(const tmb_vec2 *pts, int n, tmb_vec2 *hull)
 {
-    if (n < 3) {
-        for (int i = 0; i < n; i++)
-            hull[i] = pts[i];
-        return n;
-    }
-    tmb_vec2 *s = (tmb_vec2 *)malloc((size_t)n * sizeof(*s));
-    if (!s)
-        return 0;
-    for (int i = 0; i < n; i++)
-        s[i] = pts[i];
-    qsort(s, (size_t)n, sizeof(*s), cmp_v2);
-
-    int k = 0;
-    for (int i = 0; i < n; i++) {
-        while (k >= 2 &&
-               tmb_v2_cross(tmb_v2_sub(hull[k - 1], hull[k - 2]),
-                            tmb_v2_sub(s[i], hull[k - 2])) <= 0)
-            k--;
-        hull[k++] = s[i];
-    }
-    int lower = k + 1;
-    for (int i = n - 2; i >= 0; i--) {
-        while (k >= lower &&
-               tmb_v2_cross(tmb_v2_sub(hull[k - 1], hull[k - 2]),
-                            tmb_v2_sub(s[i], hull[k - 2])) <= 0)
-            k--;
-        hull[k++] = s[i];
-    }
-    free(s);
-    return k > 1 ? k - 1 : k;
+    /* Delegate to the shared, bounds-safe core. The documented contract is
+     * "capacity >= n"; a convex hull never has more than n vertices, and the
+     * core writes at most `cap` of them, so passing cap = n can never overrun
+     * the caller's buffer -- unlike a raw monotone chain, which would also
+     * write the closing vertex at index n. */
+    return tmb_hull_monotone(pts, n, hull, n);
 }
 
 /* Convex hull of a point cloud, returned in a freshly allocated array that the
@@ -138,8 +105,8 @@ tmb_vec2 *tmb_convex_hull_alloc(const tmb_vec2 *pts, int n, int *out_count)
         *out_count = 0;
     if (n < 1)
         return NULL;
-    /* A convex hull has no more vertices than the input point set, so size the
-     * output to the point count. */
+    /* A convex hull has no more vertices than the input point set, and the
+     * bounds-safe core writes at most this many, so a buffer of n is enough. */
     tmb_vec2 *hull = (tmb_vec2 *)malloc((size_t)n * sizeof(*hull));
     if (!hull)
         return NULL;
