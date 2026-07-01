@@ -47,6 +47,20 @@ float tmb_clampf(float v, float lo, float hi)
 {
     return v < lo ? lo : (v > hi ? hi : v);
 }
+
+int tmb_floor_mod(long v, int m)
+{
+    /* Euclidean (floored) modulo: the result is always in [0, m) for m > 0,
+     * unlike C's '%', which keeps the sign of the dividend and would yield a
+     * negative index for a negative v. */
+    if (m <= 0)
+        return 0;
+    long r = v % m;
+    if (r < 0)
+        r += m;
+    return (int)r;
+}
+
 float tmb_absf(float v) { return v < 0 ? -v : v; }
 float tmb_minf(float a, float b) { return a < b ? a : b; }
 float tmb_maxf(float a, float b) { return a > b ? a : b; }

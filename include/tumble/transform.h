@@ -26,6 +26,9 @@ tmb_vec2 tmb_xform_dir(tmb_xform xf, tmb_vec2 dir);
 tmb_vec2 tmb_xform_unpoint(tmb_xform xf, tmb_vec2 world);
 
 float tmb_clampf(float v, float lo, float hi);
+/* Euclidean (floored) modulo: result is always in [0, m) for m > 0, so it is
+ * safe for wrapping a possibly-negative index into an array bucket. */
+int tmb_floor_mod(long v, int m);
 float tmb_absf(float v);
 float tmb_minf(float a, float b);
 float tmb_maxf(float a, float b);

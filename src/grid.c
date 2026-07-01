@@ -1,5 +1,6 @@
 #include "tumble/grid.h"
 #include "tumble/shape.h"
+#include "tumble/transform.h"
 
 #include <stdlib.h>
 #include <math.h>
@@ -165,12 +166,16 @@ void tmb_grid_occupancy(const tmb_grid *g, int *counts, int side)
     for (int i = 0; i < side * side; i++)
         counts[i] = 0;
     /* Fold each body's cell coordinates into a side x side heatmap so callers
-     * can see how the scene is distributed across the grid. */
+     * can see how the scene is distributed across the grid.  Cell coordinates
+     * are signed and are frequently negative (any body below/left of the
+     * origin), so the fold must use a floored modulo that always lands in
+     * [0, side) -- a plain '%' keeps the sign of the dividend and would index
+     * before the start of counts. */
     for (size_t i = 0; i < g->nbody; i++) {
         long cx = (long)floorf(g->boxes[i].min.x / g->cell);
         long cy = (long)floorf(g->boxes[i].min.y / g->cell);
-        int bx = (int)(cx % side);
-        int by = (int)(cy % side);
+        int bx = tmb_floor_mod(cx, side);
+        int by = tmb_floor_mod(cy, side);
         counts[by * side + bx]++;
     }
 }
