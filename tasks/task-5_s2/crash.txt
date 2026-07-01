@@ -1,32 +1,32 @@
 INFO: Running with entropic power schedule (0xFF, 100).
-INFO: Seed: 1931973114
-INFO: Loaded 1 modules   (15387 inline 8-bit counters): 15387 [0x560b3d025d80, 0x560b3d02999b), 
-INFO: Loaded 1 PC tables (15387 PCs): 15387 [0x560b3d0299a0,0x560b3d065b50), 
-/tmp/fuzz_build_main4/world_ops_fuzzer: Running 1 inputs 1 time(s) each.
-Running: /tmp/poc_bug5.bin
+INFO: Seed: 3648947973
+INFO: Loaded 1 modules   (15387 inline 8-bit counters): 15387 [0x5634ff5e0d80, 0x5634ff5e499b), 
+INFO: Loaded 1 PC tables (15387 PCs): 15387 [0x5634ff5e49a0,0x5634ff620b50), 
+/tmp/v2_main/f: Running 1 inputs 1 time(s) each.
+Running: tasks/task-5_s2/poc.bin
 =================================================================
-==1721614==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x62d000009400 at pc 0x560b3cf55b6c bp 0x7fff65497ae0 sp 0x7fff65497ad8
+==1795918==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x62d000009400 at pc 0x5634ff510b6c bp 0x7fffc14e88a0 sp 0x7fffc14e8898
 WRITE of size 8 at 0x62d000009400 thread T0
-    #0 0x560b3cf55b6b in tmb_recorder_capture /root/bolo/fenrir/Fenrir/tumble/src/recorder.c:38:29
-    #1 0x560b3cfa6123 in LLVMFuzzerTestOneInput /root/bolo/fenrir/Fenrir/tumble/fuzz/world_ops_fuzzer.c:95:17
-    #2 0x560b3ce0f423 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) (/tmp/fuzz_build_main4/world_ops_fuzzer+0xe3423) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
-    #3 0x560b3cdf919f in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) (/tmp/fuzz_build_main4/world_ops_fuzzer+0xcd19f) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
-    #4 0x560b3cdfeef6 in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) (/tmp/fuzz_build_main4/world_ops_fuzzer+0xd2ef6) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
-    #5 0x560b3ce28d12 in main (/tmp/fuzz_build_main4/world_ops_fuzzer+0xfcd12) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
-    #6 0x7fe6e10e7d8f  (/lib/x86_64-linux-gnu/libc.so.6+0x29d8f) (BuildId: 095c7ba148aeca81668091f718047078d57efddb)
-    #7 0x7fe6e10e7e3f in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x29e3f) (BuildId: 095c7ba148aeca81668091f718047078d57efddb)
-    #8 0x560b3cdf3a64 in _start (/tmp/fuzz_build_main4/world_ops_fuzzer+0xc7a64) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
+    #0 0x5634ff510b6b in tmb_recorder_capture /root/bolo/fenrir/Fenrir/tumble/src/recorder.c:38:29
+    #1 0x5634ff561123 in LLVMFuzzerTestOneInput /root/bolo/fenrir/Fenrir/tumble/fuzz/world_ops_fuzzer.c:95:17
+    #2 0x5634ff3ca423 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) (/tmp/v2_main/f+0xe3423) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
+    #3 0x5634ff3b419f in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) (/tmp/v2_main/f+0xcd19f) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
+    #4 0x5634ff3b9ef6 in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) (/tmp/v2_main/f+0xd2ef6) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
+    #5 0x5634ff3e3d12 in main (/tmp/v2_main/f+0xfcd12) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
+    #6 0x7efca3e1bd8f  (/lib/x86_64-linux-gnu/libc.so.6+0x29d8f) (BuildId: 095c7ba148aeca81668091f718047078d57efddb)
+    #7 0x7efca3e1be3f in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x29e3f) (BuildId: 095c7ba148aeca81668091f718047078d57efddb)
+    #8 0x5634ff3aea64 in _start (/tmp/v2_main/f+0xc7a64) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
 
 0x62d000009400 is located 0 bytes to the right of 36864-byte region [0x62d000000400,0x62d000009400)
 allocated by thread T0 here:
-    #0 0x560b3ceabec6 in __interceptor_realloc (/tmp/fuzz_build_main4/world_ops_fuzzer+0x17fec6) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
-    #1 0x560b3cf549b3 in tmb_recorder_capture /root/bolo/fenrir/Fenrir/tumble/src/recorder.c:27:45
-    #2 0x560b3cfa6123 in LLVMFuzzerTestOneInput /root/bolo/fenrir/Fenrir/tumble/fuzz/world_ops_fuzzer.c:95:17
-    #3 0x560b3ce0f423 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) (/tmp/fuzz_build_main4/world_ops_fuzzer+0xe3423) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
-    #4 0x560b3cdf919f in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) (/tmp/fuzz_build_main4/world_ops_fuzzer+0xcd19f) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
-    #5 0x560b3cdfeef6 in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) (/tmp/fuzz_build_main4/world_ops_fuzzer+0xd2ef6) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
-    #6 0x560b3ce28d12 in main (/tmp/fuzz_build_main4/world_ops_fuzzer+0xfcd12) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
-    #7 0x7fe6e10e7d8f  (/lib/x86_64-linux-gnu/libc.so.6+0x29d8f) (BuildId: 095c7ba148aeca81668091f718047078d57efddb)
+    #0 0x5634ff466ec6 in __interceptor_realloc (/tmp/v2_main/f+0x17fec6) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
+    #1 0x5634ff50f9b3 in tmb_recorder_capture /root/bolo/fenrir/Fenrir/tumble/src/recorder.c:27:45
+    #2 0x5634ff561123 in LLVMFuzzerTestOneInput /root/bolo/fenrir/Fenrir/tumble/fuzz/world_ops_fuzzer.c:95:17
+    #3 0x5634ff3ca423 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) (/tmp/v2_main/f+0xe3423) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
+    #4 0x5634ff3b419f in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) (/tmp/v2_main/f+0xcd19f) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
+    #5 0x5634ff3b9ef6 in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) (/tmp/v2_main/f+0xd2ef6) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
+    #6 0x5634ff3e3d12 in main (/tmp/v2_main/f+0xfcd12) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
+    #7 0x7efca3e1bd8f  (/lib/x86_64-linux-gnu/libc.so.6+0x29d8f) (BuildId: 095c7ba148aeca81668091f718047078d57efddb)
 
 SUMMARY: AddressSanitizer: heap-buffer-overflow /root/bolo/fenrir/Fenrir/tumble/src/recorder.c:38:29 in tmb_recorder_capture
 Shadow bytes around the buggy address:
@@ -60,4 +60,4 @@ Shadow byte legend (one shadow byte represents 8 application bytes):
   ASan internal:           fe
   Left alloca redzone:     ca
   Right alloca redzone:    cb
-==1721614==ABORTING
+==1795918==ABORTING

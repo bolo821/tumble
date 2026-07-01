@@ -1,42 +1,47 @@
-/tmp/fuzz_build12/world_ops_fuzzer: Running 1 inputs 1 time(s) each.
+INFO: Running with entropic power schedule (0xFF, 100).
+INFO: Seed: 2277829009
+INFO: Loaded 1 modules   (15387 inline 8-bit counters): 15387 [0x557943340d80, 0x55794334499b), 
+INFO: Loaded 1 PC tables (15387 PCs): 15387 [0x5579433449a0,0x557943380b50), 
+/tmp/v2_main/f: Running 1 inputs 1 time(s) each.
+Running: tasks/task-1_s2/poc.bin
 =================================================================
-==1710868==ERROR: AddressSanitizer: heap-use-after-free on address 0x6020000001f0 at pc 0x56322044e3d3 bp 0x7ffe0e50e900 sp 0x7ffe0e50e8f8
+==1795882==ERROR: AddressSanitizer: heap-use-after-free on address 0x6020000001f0 at pc 0x5579432413d3 bp 0x7ffc4f8fd280 sp 0x7ffc4f8fd278
 READ of size 4 at 0x6020000001f0 thread T0
-    #0 0x56322044e3d2 in wake_island /root/bolo/fenrir/Fenrir/tumble/src/island_sleep.c:135:22
-    #1 0x56322044ac46 in tmb_sleep_update /root/bolo/fenrir/Fenrir/tumble/src/island_sleep.c
-    #2 0x5632204cd388 in tmb_world_step /root/bolo/fenrir/Fenrir/tumble/src/world.c:212:9
-    #3 0x5632204ce117 in LLVMFuzzerTestOneInput /root/bolo/fenrir/Fenrir/tumble/fuzz/world_ops_fuzzer.c:94:17
-    #4 0x563220337423 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) (/tmp/fuzz_build12/world_ops_fuzzer+0xe3423) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
-    #5 0x56322032119f in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) (/tmp/fuzz_build12/world_ops_fuzzer+0xcd19f) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
-    #6 0x563220326ef6 in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) (/tmp/fuzz_build12/world_ops_fuzzer+0xd2ef6) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
-    #7 0x563220350d12 in main (/tmp/fuzz_build12/world_ops_fuzzer+0xfcd12) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
-    #8 0x7fa09daeed8f  (/lib/x86_64-linux-gnu/libc.so.6+0x29d8f) (BuildId: 095c7ba148aeca81668091f718047078d57efddb)
-    #9 0x7fa09daeee3f in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x29e3f) (BuildId: 095c7ba148aeca81668091f718047078d57efddb)
-    #10 0x56322031ba64 in _start (/tmp/fuzz_build12/world_ops_fuzzer+0xc7a64) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
+    #0 0x5579432413d2 in wake_island /root/bolo/fenrir/Fenrir/tumble/src/island_sleep.c:135:22
+    #1 0x55794323dc46 in tmb_sleep_update /root/bolo/fenrir/Fenrir/tumble/src/island_sleep.c
+    #2 0x5579432c0388 in tmb_world_step /root/bolo/fenrir/Fenrir/tumble/src/world.c:212:9
+    #3 0x5579432c1117 in LLVMFuzzerTestOneInput /root/bolo/fenrir/Fenrir/tumble/fuzz/world_ops_fuzzer.c:94:17
+    #4 0x55794312a423 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) (/tmp/v2_main/f+0xe3423) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
+    #5 0x55794311419f in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) (/tmp/v2_main/f+0xcd19f) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
+    #6 0x557943119ef6 in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) (/tmp/v2_main/f+0xd2ef6) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
+    #7 0x557943143d12 in main (/tmp/v2_main/f+0xfcd12) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
+    #8 0x7fbf74e0dd8f  (/lib/x86_64-linux-gnu/libc.so.6+0x29d8f) (BuildId: 095c7ba148aeca81668091f718047078d57efddb)
+    #9 0x7fbf74e0de3f in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x29e3f) (BuildId: 095c7ba148aeca81668091f718047078d57efddb)
+    #10 0x55794310ea64 in _start (/tmp/v2_main/f+0xc7a64) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
 
 0x6020000001f0 is located 0 bytes inside of 8-byte region [0x6020000001f0,0x6020000001f8)
 freed by thread T0 here:
-    #0 0x5632203d37f2 in __interceptor_free (/tmp/fuzz_build12/world_ops_fuzzer+0x17f7f2) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
-    #1 0x563220451691 in rec_free /root/bolo/fenrir/Fenrir/tumble/src/island_sleep.c:46:5
-    #2 0x56322044fc5a in tmb_sleep_on_remove /root/bolo/fenrir/Fenrir/tumble/src/island_sleep.c:315:9
-    #3 0x5632204c8d72 in tmb_world_remove_body /root/bolo/fenrir/Fenrir/tumble/src/world.c:47:9
-    #4 0x5632204ce1eb in LLVMFuzzerTestOneInput /root/bolo/fenrir/Fenrir/tumble/fuzz/world_ops_fuzzer.c:106:17
-    #5 0x563220337423 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) (/tmp/fuzz_build12/world_ops_fuzzer+0xe3423) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
-    #6 0x56322032119f in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) (/tmp/fuzz_build12/world_ops_fuzzer+0xcd19f) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
-    #7 0x563220326ef6 in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) (/tmp/fuzz_build12/world_ops_fuzzer+0xd2ef6) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
-    #8 0x563220350d12 in main (/tmp/fuzz_build12/world_ops_fuzzer+0xfcd12) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
-    #9 0x7fa09daeed8f  (/lib/x86_64-linux-gnu/libc.so.6+0x29d8f) (BuildId: 095c7ba148aeca81668091f718047078d57efddb)
+    #0 0x5579431c67f2 in __interceptor_free (/tmp/v2_main/f+0x17f7f2) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
+    #1 0x557943244691 in rec_free /root/bolo/fenrir/Fenrir/tumble/src/island_sleep.c:46:5
+    #2 0x557943242c5a in tmb_sleep_on_remove /root/bolo/fenrir/Fenrir/tumble/src/island_sleep.c:315:9
+    #3 0x5579432bbd72 in tmb_world_remove_body /root/bolo/fenrir/Fenrir/tumble/src/world.c:47:9
+    #4 0x5579432c11eb in LLVMFuzzerTestOneInput /root/bolo/fenrir/Fenrir/tumble/fuzz/world_ops_fuzzer.c:106:17
+    #5 0x55794312a423 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) (/tmp/v2_main/f+0xe3423) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
+    #6 0x55794311419f in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) (/tmp/v2_main/f+0xcd19f) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
+    #7 0x557943119ef6 in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) (/tmp/v2_main/f+0xd2ef6) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
+    #8 0x557943143d12 in main (/tmp/v2_main/f+0xfcd12) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
+    #9 0x7fbf74e0dd8f  (/lib/x86_64-linux-gnu/libc.so.6+0x29d8f) (BuildId: 095c7ba148aeca81668091f718047078d57efddb)
 
 previously allocated by thread T0 here:
-    #0 0x5632203d3a9e in malloc (/tmp/fuzz_build12/world_ops_fuzzer+0x17fa9e) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
-    #1 0x56322044be9c in tmb_sleep_update /root/bolo/fenrir/Fenrir/tumble/src/island_sleep.c:234:36
-    #2 0x5632204cd388 in tmb_world_step /root/bolo/fenrir/Fenrir/tumble/src/world.c:212:9
-    #3 0x5632204ce117 in LLVMFuzzerTestOneInput /root/bolo/fenrir/Fenrir/tumble/fuzz/world_ops_fuzzer.c:94:17
-    #4 0x563220337423 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) (/tmp/fuzz_build12/world_ops_fuzzer+0xe3423) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
-    #5 0x56322032119f in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) (/tmp/fuzz_build12/world_ops_fuzzer+0xcd19f) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
-    #6 0x563220326ef6 in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) (/tmp/fuzz_build12/world_ops_fuzzer+0xd2ef6) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
-    #7 0x563220350d12 in main (/tmp/fuzz_build12/world_ops_fuzzer+0xfcd12) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
-    #8 0x7fa09daeed8f  (/lib/x86_64-linux-gnu/libc.so.6+0x29d8f) (BuildId: 095c7ba148aeca81668091f718047078d57efddb)
+    #0 0x5579431c6a9e in malloc (/tmp/v2_main/f+0x17fa9e) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
+    #1 0x55794323ee9c in tmb_sleep_update /root/bolo/fenrir/Fenrir/tumble/src/island_sleep.c:234:36
+    #2 0x5579432c0388 in tmb_world_step /root/bolo/fenrir/Fenrir/tumble/src/world.c:212:9
+    #3 0x5579432c1117 in LLVMFuzzerTestOneInput /root/bolo/fenrir/Fenrir/tumble/fuzz/world_ops_fuzzer.c:94:17
+    #4 0x55794312a423 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) (/tmp/v2_main/f+0xe3423) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
+    #5 0x55794311419f in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) (/tmp/v2_main/f+0xcd19f) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
+    #6 0x557943119ef6 in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) (/tmp/v2_main/f+0xd2ef6) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
+    #7 0x557943143d12 in main (/tmp/v2_main/f+0xfcd12) (BuildId: ecc28c2cea96b0e1e21d61a87da9643915d956bc)
+    #8 0x7fbf74e0dd8f  (/lib/x86_64-linux-gnu/libc.so.6+0x29d8f) (BuildId: 095c7ba148aeca81668091f718047078d57efddb)
 
 SUMMARY: AddressSanitizer: heap-use-after-free /root/bolo/fenrir/Fenrir/tumble/src/island_sleep.c:135:22 in wake_island
 Shadow bytes around the buggy address:
@@ -70,4 +75,4 @@ Shadow byte legend (one shadow byte represents 8 application bytes):
   ASan internal:           fe
   Left alloca redzone:     ca
   Right alloca redzone:    cb
-==1710868==ABORTING
+==1795882==ABORTING

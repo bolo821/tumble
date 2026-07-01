@@ -1,92 +1,36 @@
-diff --git a/fuzz/world_ops_fuzzer.c b/fuzz/world_ops_fuzzer.c
-index 10a0e59..59e73cf 100644
---- a/fuzz/world_ops_fuzzer.c
-+++ b/fuzz/world_ops_fuzzer.c
-@@ -11,6 +11,7 @@
- 
- #include "tumble/tumble.h"
- #include "tumble/island_sleep.h"
-+#include "tumble/solver.h"
- #include "tumble/warmstart.h"
- #include "tumble/joints_ext.h"
- #include "tumble/contact_events.h"
-@@ -104,6 +105,15 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
-                 uint8_t slot = u8(&c);
-                 uint32_t idx = 1 + (uint32_t)(slot % (uint32_t)(bc - 1));
-                 tmb_world_remove_body(&w, idx);
-+                /* After the body-array compact, every joint's body_a_ptr /
-+                 * body_b_ptr must point into the NEW array (or be NULL).
-+                 * The fix nulls them; a non-NULL stale pointer from before
-+                 * the realloc is caught here before the next step reads it. */
-+                if (w.joint_count > 0) {
-+                    char jerr[256];
-+                    if (tmb_joints_ptr_cache_valid(&w, jerr, sizeof(jerr)) != 0)
-+                        __builtin_trap();
-+                }
-             } else {
-                 (void)u8(&c);
-             }
 diff --git a/include/tumble/solver.h b/include/tumble/solver.h
-index fb62121..cdbe7d8 100644
+index fb62121..bb5a3cf 100644
 --- a/include/tumble/solver.h
 +++ b/include/tumble/solver.h
-@@ -10,6 +10,29 @@ void tmb_solver_solve_velocity(tmb_world *w);
+@@ -10,6 +10,13 @@ void tmb_solver_solve_velocity(tmb_world *w);
  void tmb_solver_solve_position(tmb_world *w);
  void tmb_joints_prepare(tmb_world *w, float dt);
  void tmb_joints_solve(tmb_world *w);
 +
-+/* Joint body-pointer cache lifecycle.
-+ *
-+ * tmb_joint stores body_a_ptr / body_b_ptr as a fast path to avoid
-+ * re-dereferencing j->a / j->b through w->bodies on every prepare call.
-+ * The cache is populated at the END of tmb_joints_prepare and consumed at
-+ * the START of the next one.
-+ *
-+ * The cache becomes stale whenever w->bodies is reallocated: a realloc may
-+ * move the allocation to a new address, leaving all previously cached
-+ * &w->bodies[j->a] pointers dangling into the freed block.  This happens
-+ * whenever tmb_world_remove_body compacts the body buffer.
-+ *
-+ * tmb_joints_invalidate_ptr_cache() nulls out every cached pointer.  Call
-+ * it after any operation that reallocates w->bodies (body removal, pool
-+ * resize) so that the next tmb_joints_prepare uses safe index-based access.
-+ *
-+ * tmb_joints_ptr_cache_valid() is a diagnostic helper: it verifies that
-+ * every non-NULL cached pointer falls within the current body array.  Use in
-+ * debug builds or tests; O(n) over the joint list.
-+ */
++/* Null out every joint's cached body pointer (body_a_ptr / body_b_ptr).  The
++ * cache is a fast path populated at the end of tmb_joints_prepare; it becomes
++ * dangling when the body array is reallocated (e.g. the compact realloc in
++ * tmb_world_remove_body).  Call this after any such realloc so the next
++ * prepare pass re-resolves the pointers from the current body array. */
 +void tmb_joints_invalidate_ptr_cache(tmb_world *w);
-+int  tmb_joints_ptr_cache_valid(const tmb_world *w, char *msg, size_t msg_len);
  #ifdef __cplusplus
  }
  #endif
 diff --git a/src/solver.c b/src/solver.c
-index 600f722..075c71e 100644
+index 600f722..0281ed7 100644
 --- a/src/solver.c
 +++ b/src/solver.c
-@@ -1,6 +1,7 @@
- #include "tumble/solver.h"
- 
- #include <math.h>
-+#include <stdio.h>
- #include <stdlib.h>
- 
- #define TMB_SLOP 0.005f
-@@ -158,6 +159,62 @@ void tmb_joints_prepare(tmb_world *w, float dt)
+@@ -158,6 +158,21 @@ void tmb_joints_prepare(tmb_world *w, float dt)
      }
  }
  
-+/* ---- joint body-pointer cache management ---- */
-+
 +void tmb_joints_invalidate_ptr_cache(tmb_world *w)
 +{
-+    /* Null out every cached body pointer so the next tmb_joints_prepare
-+     * invocation falls back to the safe index-based lookup.  Must be called
-+     * after any operation that reallocates or moves the body array (e.g. a
-+     * body removal followed by the compact realloc in tmb_world_remove_body),
-+     * because realloc may change the base address of w->bodies, making all
-+     * previously cached &w->bodies[j->a] / &w->bodies[j->b] addresses
-+     * dangle into the freed allocation. */
++    /* Null every cached body pointer so the next tmb_joints_prepare falls back
++     * to the index-based &w->bodies[j->a] lookup.  Must be called after any
++     * operation that reallocates the body array (e.g. the compact realloc in
++     * tmb_world_remove_body): realloc may move the allocation, leaving the
++     * previously cached pointers dangling into the freed block. */
 +    if (!w->joints)
 +        return;
 +    for (size_t i = 0; i < w->joint_count; i++) {
@@ -95,348 +39,23 @@ index 600f722..075c71e 100644
 +    }
 +}
 +
-+int tmb_joints_ptr_cache_valid(const tmb_world *w, char *msg, size_t msg_len)
-+{
-+    /* A NULL cached pointer is always valid (it means the next prepare pass
-+     * will use the index directly).  A non-NULL pointer is valid iff it falls
-+     * within the current body array.  After a compact realloc, a non-NULL
-+     * pointer that was set before the realloc will usually point outside the
-+     * new allocation; ASan catches the subsequent dereference as UAF. */
-+    if (!w->joints || !w->bodies)
-+        return 0;
-+    for (size_t i = 0; i < w->joint_count; i++) {
-+        const tmb_joint *j = &w->joints[i];
-+        if (j->body_a_ptr) {
-+            ptrdiff_t off = j->body_a_ptr - w->bodies;
-+            if (off < 0 || (size_t)off >= w->body_count) {
-+                if (msg && msg_len)
-+                    snprintf(msg, msg_len,
-+                             "joint[%zu].body_a_ptr offset=%td out of body array "
-+                             "[0,%zu)",
-+                             i, off, w->body_count);
-+                return -1;
-+            }
-+        }
-+        if (j->body_b_ptr) {
-+            ptrdiff_t off = j->body_b_ptr - w->bodies;
-+            if (off < 0 || (size_t)off >= w->body_count) {
-+                if (msg && msg_len)
-+                    snprintf(msg, msg_len,
-+                             "joint[%zu].body_b_ptr offset=%td out of body array "
-+                             "[0,%zu)",
-+                             i, off, w->body_count);
-+                return -1;
-+            }
-+        }
-+    }
-+    return 0;
-+}
-+
  void tmb_joints_solve(tmb_world *w)
  {
      for (size_t i = 0; i < w->joint_count; i++) {
 diff --git a/src/world.c b/src/world.c
-index c44d986..ae00307 100644
+index c44d986..3bdc401 100644
 --- a/src/world.c
 +++ b/src/world.c
-@@ -64,6 +64,13 @@ uint32_t tmb_world_remove_body(tmb_world *w, uint32_t i)
+@@ -64,6 +64,12 @@ uint32_t tmb_world_remove_body(tmb_world *w, uint32_t i)
          w->body_cap = 0;
      }
  
-+    /* The compact realloc above may have moved the body array to a new
-+     * address.  Any joint that cached &w->bodies[j->a] or &w->bodies[j->b]
-+     * from a prior step now holds a dangling pointer into the freed block.
-+     * Invalidating the cache here forces the next tmb_joints_prepare to fall
-+     * back to the safe index-based &w->bodies[j->a] lookup. */
++    /* The compact realloc above may have moved the body array.  Any joint that
++     * cached &w->bodies[j->a] / &w->bodies[j->b] from a prior step now holds a
++     * dangling pointer, so drop the cache and let the next prepare pass
++     * re-resolve it against the new allocation. */
 +    tmb_joints_invalidate_ptr_cache(w);
 +
      return i;
  }
  
-diff --git a/tests/test_joint_ptr_cache.c b/tests/test_joint_ptr_cache.c
-new file mode 100644
-index 0000000..2e0389e
---- /dev/null
-+++ b/tests/test_joint_ptr_cache.c
-@@ -0,0 +1,281 @@
-+/* Regression tests for the joint body-pointer cache lifetime.
-+ *
-+ * tmb_joint caches body_a_ptr / body_b_ptr as a fast path inside
-+ * tmb_joints_prepare.  The cache is set at the END of one prepare call and
-+ * consumed at the START of the next.  If the body array is reallocated
-+ * between two prepare calls (e.g. because tmb_world_remove_body compacted it),
-+ * the cached pointers dangle into the freed allocation.  On the next step,
-+ * tmb_joints_prepare dereferences them → heap-use-after-free.
-+ *
-+ * The fix calls tmb_joints_invalidate_ptr_cache after the compact realloc,
-+ * nulling all cached pointers so the next prepare falls back to safe index
-+ * lookup.
-+ *
-+ * All tests run under ASan so any stale-pointer dereference is caught. */
-+
-+#include "tumble/tumble.h"
-+#include "tumble/solver.h"
-+
-+#include "tttest.h"
-+#include <stdio.h>
-+#include <string.h>
-+
-+/* ---- helpers ---- */
-+
-+static tmb_world make_world(void)
-+{
-+    tmb_world w;
-+    tmb_world_init(&w);
-+    w.gravity = tmb_v2(0.0f, -10.0f);
-+    return w;
-+}
-+
-+static uint32_t add_box(tmb_world *w, float x, float y)
-+{
-+    tmb_body b;
-+    tmb_body_init(&b, TMB_BODY_DYNAMIC, tmb_shape_box(0.5f, 0.5f),
-+                  tmb_v2(x, y));
-+    return tmb_world_add_body(w, &b);
-+}
-+
-+static void add_floor(tmb_world *w)
-+{
-+    tmb_body f;
-+    tmb_body_init(&f, TMB_BODY_STATIC, tmb_shape_box(20.0f, 1.0f),
-+                  tmb_v2(0, -5.0f));
-+    tmb_world_add_body(w, &f);
-+}
-+
-+static uint32_t add_distance_joint(tmb_world *w, uint32_t a, uint32_t b)
-+{
-+    tmb_joint j;
-+    memset(&j, 0, sizeof(j));
-+    j.kind = TMB_JOINT_DISTANCE;
-+    j.a = a;
-+    j.b = b;
-+    j.rest_length = 1.0f;
-+    return tmb_world_add_joint(w, &j);
-+}
-+
-+static int ptr_ok(const tmb_world *w)
-+{
-+    char msg[256];
-+    int rc = tmb_joints_ptr_cache_valid(w, msg, sizeof(msg));
-+    if (rc != 0)
-+        fprintf(stderr, "  ptr_cache: %s\n", msg);
-+    return rc;
-+}
-+
-+/* ---- tests ---- */
-+
-+/* Base case: add bodies + joint, step once (populates cache), remove a
-+ * third unrelated body (triggers compact), verify cache is now NULL.
-+ * A second step must complete without a crash (on the unfixed code the
-+ * stale pointer would be dereferenced here by tmb_joints_prepare). */
-+static int test_ptr_cache_cleared_after_bystander_remove(void)
-+{
-+    tmb_world w = make_world();
-+    add_floor(&w);
-+    uint32_t a = add_box(&w,  0.0f, 2.0f);  /* joint endpoint */
-+    uint32_t b = add_box(&w,  1.5f, 2.0f);  /* joint endpoint */
-+    uint32_t c = add_box(&w, -1.5f, 2.0f);  /* bystander: removed below */
-+    (void)c;
-+    add_distance_joint(&w, a, b);
-+
-+    /* Populate the pointer cache. */
-+    tmb_world_step(&w, 1.0f / 60.0f);
-+    CHECK(w.joints[0].body_a_ptr != NULL);
-+    CHECK(w.joints[0].body_b_ptr != NULL);
-+    CHECK(ptr_ok(&w) == 0);
-+
-+    /* Remove the bystander: triggers compact realloc.
-+     * The fix nulls both cached pointers immediately. */
-+    tmb_world_remove_body(&w, c);
-+    CHECK(w.joints[0].body_a_ptr == NULL);
-+    CHECK(w.joints[0].body_b_ptr == NULL);
-+    CHECK(ptr_ok(&w) == 0);
-+
-+    /* Next step must not crash (unfixed code reads freed memory here). */
-+    tmb_world_step(&w, 1.0f / 60.0f);
-+    CHECK(ptr_ok(&w) == 0);
-+
-+    tmb_world_free(&w);
-+    return 0;
-+}
-+
-+/* Two separate joints, one bystander.  Both joints' caches must be cleared
-+ * together after a single remove. */
-+static int test_ptr_cache_two_joints_one_remove(void)
-+{
-+    tmb_world w = make_world();
-+    add_floor(&w);
-+    uint32_t a = add_box(&w,  0.0f, 2.0f);
-+    uint32_t b = add_box(&w,  1.5f, 2.0f);
-+    uint32_t c = add_box(&w,  3.0f, 2.0f);
-+    uint32_t d = add_box(&w, -1.5f, 5.0f);  /* bystander */
-+    (void)d;
-+    add_distance_joint(&w, a, b);
-+    add_distance_joint(&w, b, c);
-+
-+    /* Cache both joints. */
-+    tmb_world_step(&w, 1.0f / 60.0f);
-+    CHECK(w.joint_count == 2);
-+    CHECK(w.joints[0].body_a_ptr != NULL);
-+    CHECK(w.joints[1].body_a_ptr != NULL);
-+    CHECK(ptr_ok(&w) == 0);
-+
-+    /* Remove bystander d: triggers compact; both pointers must be nulled. */
-+    tmb_world_remove_body(&w, d);
-+    CHECK(w.joints[0].body_a_ptr == NULL);
-+    CHECK(w.joints[0].body_b_ptr == NULL);
-+    CHECK(w.joints[1].body_a_ptr == NULL);
-+    CHECK(w.joints[1].body_b_ptr == NULL);
-+    CHECK(ptr_ok(&w) == 0);
-+
-+    /* Both joints must continue to function after cache refresh. */
-+    tmb_world_step(&w, 1.0f / 60.0f);
-+    CHECK(ptr_ok(&w) == 0);
-+    CHECK(w.joint_count == 2);
-+
-+    tmb_world_free(&w);
-+    return 0;
-+}
-+
-+/* Multiple bystander removes in sequence: the cache is nulled each time and
-+ * the engine continues stepping cleanly between removes. */
-+static int test_ptr_cache_across_multiple_bystander_removes(void)
-+{
-+    tmb_world w = make_world();
-+    add_floor(&w);
-+    /* joint endpoints at high indices so we can remove low-index bystanders */
-+    uint32_t b0 = add_box(&w, 5.0f, 2.0f);
-+    uint32_t b1 = add_box(&w, 6.5f, 2.0f);
-+    /* bystanders at low indices that will be removed */
-+    uint32_t by0 = add_box(&w, -5.0f, 2.0f);
-+    uint32_t by1 = add_box(&w, -3.5f, 2.0f);
-+    uint32_t by2 = add_box(&w, -2.0f, 2.0f);
-+    (void)b0; (void)b1; (void)by0; (void)by1; (void)by2;
-+    add_distance_joint(&w, b0, b1);
-+
-+    for (int i = 0; i < 3; i++)
-+        tmb_world_step(&w, 1.0f / 60.0f);
-+    CHECK(ptr_ok(&w) == 0);
-+
-+    /* Remove first bystander; step; repeat. */
-+    for (int round = 0; round < 3; round++) {
-+        if (tmb_world_body_count(&w) <= 3)
-+            break;
-+        /* Always remove index 1 (first dynamic body that is not a joint ep). */
-+        tmb_world_remove_body(&w, 1);
-+
-+        /* Immediately after remove: all caches must be NULL. */
-+        for (size_t k = 0; k < w.joint_count; k++) {
-+            CHECK(w.joints[k].body_a_ptr == NULL);
-+            CHECK(w.joints[k].body_b_ptr == NULL);
-+        }
-+        CHECK(ptr_ok(&w) == 0);
-+
-+        /* After the next step the cache is refreshed. */
-+        tmb_world_step(&w, 1.0f / 60.0f);
-+        CHECK(ptr_ok(&w) == 0);
-+    }
-+
-+    tmb_world_free(&w);
-+    return 0;
-+}
-+
-+/* Validate that a live cache (set by a step with no intervening removal)
-+ * always refers to slots within the current body array. */
-+static int test_ptr_cache_live_after_step(void)
-+{
-+    tmb_world w = make_world();
-+    add_floor(&w);
-+    uint32_t a = add_box(&w, 0.0f, 2.0f);
-+    uint32_t b = add_box(&w, 1.5f, 2.0f);
-+    (void)a; (void)b;
-+    add_distance_joint(&w, a, b);
-+
-+    for (int i = 0; i < 30; i++) {
-+        tmb_world_step(&w, 1.0f / 60.0f);
-+        CHECK(ptr_ok(&w) == 0);
-+    }
-+
-+    tmb_world_free(&w);
-+    return 0;
-+}
-+
-+/* Revolute joint (kind != DISTANCE): same pointer cache; same fix applies. */
-+static int test_ptr_cache_revolute_joint_bystander_remove(void)
-+{
-+    tmb_world w = make_world();
-+    add_floor(&w);
-+    uint32_t a = add_box(&w, 0.0f, 2.0f);
-+    uint32_t b = add_box(&w, 0.0f, 3.5f);
-+    uint32_t c = add_box(&w, 5.0f, 2.0f);  /* bystander */
-+    (void)c;
-+
-+    tmb_joint j;
-+    memset(&j, 0, sizeof(j));
-+    j.kind = TMB_JOINT_REVOLUTE;
-+    j.a = a;
-+    j.b = b;
-+    tmb_world_add_joint(&w, &j);
-+
-+    /* Step once to fill the cache. */
-+    tmb_world_step(&w, 1.0f / 60.0f);
-+    CHECK(w.joints[0].body_a_ptr != NULL);
-+    CHECK(ptr_ok(&w) == 0);
-+
-+    /* Remove bystander c: triggers compact. */
-+    tmb_world_remove_body(&w, c);
-+    CHECK(w.joints[0].body_a_ptr == NULL);
-+    CHECK(ptr_ok(&w) == 0);
-+
-+    tmb_world_step(&w, 1.0f / 60.0f);
-+    CHECK(ptr_ok(&w) == 0);
-+
-+    tmb_world_free(&w);
-+    return 0;
-+}
-+
-+/* Remove the last body (no swap-pop needed) with a joint referencing earlier
-+ * bodies: body count shrinks so the compact realloc still fires.  Cache must
-+ * still be invalidated. */
-+static int test_ptr_cache_remove_last_body(void)
-+{
-+    tmb_world w = make_world();
-+    add_floor(&w);
-+    uint32_t a = add_box(&w, 0.0f, 2.0f);  /* index 1 */
-+    uint32_t b = add_box(&w, 1.5f, 2.0f);  /* index 2 */
-+    uint32_t c = add_box(&w, 3.0f, 2.0f);  /* index 3, bystander */
-+    (void)c;
-+    add_distance_joint(&w, a, b);
-+
-+    tmb_world_step(&w, 1.0f / 60.0f);
-+    CHECK(w.joints[0].body_a_ptr != NULL);
-+    CHECK(ptr_ok(&w) == 0);
-+
-+    /* Remove the last body (index 3 = c): no swap-pop, but compact fires. */
-+    tmb_world_remove_body(&w, c);
-+    CHECK(w.joints[0].body_a_ptr == NULL);
-+    CHECK(w.joints[0].body_b_ptr == NULL);
-+    CHECK(ptr_ok(&w) == 0);
-+
-+    tmb_world_step(&w, 1.0f / 60.0f);
-+    CHECK(ptr_ok(&w) == 0);
-+
-+    tmb_world_free(&w);
-+    return 0;
-+}
-+
-+int main(void)
-+{
-+    int r = 0;
-+    r |= test_ptr_cache_cleared_after_bystander_remove();
-+    r |= test_ptr_cache_two_joints_one_remove();
-+    r |= test_ptr_cache_across_multiple_bystander_removes();
-+    r |= test_ptr_cache_live_after_step();
-+    r |= test_ptr_cache_revolute_joint_bystander_remove();
-+    r |= test_ptr_cache_remove_last_body();
-+    TT_DONE();
-+}

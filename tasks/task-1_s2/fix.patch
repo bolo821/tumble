@@ -1,71 +1,22 @@
-diff --git a/fuzz/world_ops_fuzzer.c b/fuzz/world_ops_fuzzer.c
-index 10a0e59..27bee23 100644
---- a/fuzz/world_ops_fuzzer.c
-+++ b/fuzz/world_ops_fuzzer.c
-@@ -104,6 +104,17 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
-                 uint8_t slot = u8(&c);
-                 uint32_t idx = 1 + (uint32_t)(slot % (uint32_t)(bc - 1));
-                 tmb_world_remove_body(&w, idx);
-+                /* After any removal the sleep bookkeeping must remain
-+                 * self-consistent: all body_rec back-pointers must resolve to
-+                 * owned records, no two records may share a members[] block,
-+                 * and sleeping_count must equal total member count. */
-+                if (w.enable_sleeping && w.sleep) {
-+                    char errmsg[256];
-+                    if (tmb_sleep_validate(&w, errmsg, sizeof(errmsg)) != 0) {
-+                        /* Force a crash so ASan/libFuzzer capture the input. */
-+                        __builtin_trap();
-+                    }
-+                }
-             } else {
-                 (void)u8(&c);
-             }
-diff --git a/include/tumble/island_sleep.h b/include/tumble/island_sleep.h
-index 706a445..749b0cc 100644
---- a/include/tumble/island_sleep.h
-+++ b/include/tumble/island_sleep.h
-@@ -64,6 +64,22 @@ int tmb_body_is_sleeping(const tmb_world *w, uint32_t i);
-  * Returns the evicted body index, or UINT32_MAX if no eligible island. */
- uint32_t tmb_sleep_evict_largest(tmb_world *w, uint8_t slot_hint);
- 
-+/* ---- Diagnostic / validation ---- */
-+
-+/* Walk every owned island record and every per-body record pointer and check
-+ * that the system is internally consistent:
-+ *   - All owned records appear in owned[] exactly once.
-+ *   - All member indices are within the current body count.
-+ *   - Every member's body_rec[] back-pointer matches the owning record.
-+ *   - No two different owned records share a members[] allocation (catches
-+ *     shallow-copy aliasing bugs).
-+ *   - sleeping_count equals the total member count across all owned records.
-+ * Returns 0 if all checks pass; returns -1 and writes a description to
-+ * `msg` (truncated to `msg_len` bytes) on the first violation found.
-+ * Safe to call from assertions in release builds; returns 0 immediately
-+ * when sleeping is disabled or no sleep system exists. */
-+int tmb_sleep_validate(const tmb_world *w, char *msg, size_t msg_len);
-+
- #ifdef __cplusplus
- }
- #endif
 diff --git a/src/island_sleep.c b/src/island_sleep.c
-index 969563b..f4f0890 100644
+index 969563b..75b14fc 100644
 --- a/src/island_sleep.c
 +++ b/src/island_sleep.c
-@@ -276,56 +276,85 @@ void tmb_sleep_on_remove(tmb_world *w, uint32_t i, uint32_t last)
+@@ -276,34 +276,48 @@ void tmb_sleep_on_remove(tmb_world *w, uint32_t i, uint32_t last)
          tmb_island_rec *old_rec = s->body_rec[i];
  
          if (old_rec->count > 1) {
 -            /* Preserve the island without the departing body: build a reduced
 -             * copy of the record with the evicted member removed, then redirect
 -             * all surviving members to the new record. */
-+            /* Preserve the island without the departing body: allocate a NEW
-+             * record with its own independent members array (deep copy), then
-+             * redirect all surviving members to the new record.
++            /* Preserve the island without the departing body.  Allocate a NEW
++             * record with its own independent members array and copy every
++             * surviving member into it.
 +             *
-+             * IMPORTANT: do NOT use a struct-copy (*new = *old) here.  That
-+             * would alias new_rec->members to old_rec->members; when we call
-+             * rec_free(old_rec) below the shared pointer would become dangling
-+             * in new_rec, causing a heap-use-after-free in wake_island. */
++             * A struct copy (*new_rec = *old_rec) must NOT be used here: it
++             * would alias new_rec->members to old_rec->members, so the
++             * rec_free(old_rec) below would leave new_rec->members pointing at
++             * freed memory and wake_island would later read through it. */
              tmb_island_rec *new_rec =
                  (tmb_island_rec *)malloc(sizeof(*new_rec));
              if (new_rec) {
@@ -77,18 +28,16 @@ index 969563b..f4f0890 100644
 -                        new_rec->members[k] =
 -                            new_rec->members[--new_rec->count];
 -                        break;
-+                /* Allocate an independent members buffer for the survivor
-+                 * list.  The new island has at most (old_count - 1) members
-+                 * after we remove body i. */
 +                int survivor_cap = old_rec->count - 1;
-+                if (survivor_cap < 1) survivor_cap = 1;
++                if (survivor_cap < 1)
++                    survivor_cap = 1;
 +                new_rec->members =
 +                    (uint32_t *)malloc(sizeof(uint32_t) * (size_t)survivor_cap);
 +                if (!new_rec->members) {
 +                    free(new_rec);
 +                    new_rec = NULL;
 +                } else {
-+                    new_rec->cap   = survivor_cap;
++                    new_rec->cap = survivor_cap;
 +                    new_rec->count = 0;
 +
 +                    /* Copy every member except the departing body i. */
@@ -123,34 +72,22 @@ index 969563b..f4f0890 100644
              }
          } else {
              if (s->sleeping_count > 0)
-                 s->sleeping_count--;
-         }
- 
--        /* Discard the original record.  new_rec (when created) has already
--         * taken ownership of the surviving members. */
-+        /* Discard the original record.  new_rec (when allocated) already has
-+         * its own members[] allocation; freeing old_rec is now safe. */
-         rec_free(s, old_rec);
-         s->body_rec[i] = NULL;
-         s->asleep[i] = 0;
+@@ -318,7 +332,10 @@ void tmb_sleep_on_remove(tmb_world *w, uint32_t i, uint32_t last)
          s->still[i] = 0.0f;
      }
  
 -    /* Migrate the moved body's sleep state into the freed slot (swap-pop). */
 +    /* Migrate the moved body's sleep state into the freed slot (swap-pop).
-+     * world.c will copy bodies[last] → bodies[i] after we return, so any
-+     * island record that still names 'last' as a member must be patched to
-+     * use 'i' instead — otherwise wake_island iterates a stale index. */
++     * world.c copies bodies[last] -> bodies[i] after this returns, so any
++     * island record that still names 'last' as a member must be updated to
++     * name 'i' instead, or wake_island would later iterate a stale index. */
      if (i != last && last < s->cap) {
          s->body_rec[i] = s->body_rec[last];
--        s->asleep[i] = s->asleep[last];
--        s->still[i] = s->still[last];
-+        s->asleep[i]   = s->asleep[last];
-+        s->still[i]    = s->still[last];
+         s->asleep[i] = s->asleep[last];
+@@ -326,6 +343,16 @@ void tmb_sleep_on_remove(tmb_world *w, uint32_t i, uint32_t last)
          s->body_rec[last] = NULL;
          s->asleep[last] = 0;
--        s->still[last] = 0.0f;
-+        s->still[last]  = 0.0f;
+         s->still[last] = 0.0f;
 +
 +        tmb_island_rec *moved_rec = s->body_rec[i];
 +        if (moved_rec) {
@@ -164,359 +101,3 @@ index 969563b..f4f0890 100644
      }
  }
  
-@@ -358,3 +387,88 @@ int tmb_body_is_sleeping(const tmb_world *w, uint32_t i)
-         return 0;
-     return w->sleep->asleep[i];
- }
-+
-+/* ---- Diagnostic validation ---- */
-+
-+#include <stdio.h>
-+
-+int tmb_sleep_validate(const tmb_world *w, char *msg, size_t msg_len)
-+{
-+    if (!w->sleep || !w->enable_sleeping)
-+        return 0;
-+
-+    const tmb_sleep_system *s = w->sleep;
-+    size_t n = w->body_count;
-+
-+#define FAIL(fmt, ...) \
-+    do { \
-+        if (msg && msg_len) snprintf(msg, msg_len, fmt, ##__VA_ARGS__); \
-+        return -1; \
-+    } while (0)
-+
-+    /* 1. Every owned record must have a non-NULL, non-empty members array and
-+     *    all member indices must be within the current body count. */
-+    size_t total_members = 0;
-+    for (size_t r = 0; r < s->owned_count; r++) {
-+        const tmb_island_rec *rec = s->owned[r];
-+        if (!rec)
-+            FAIL("owned[%zu] is NULL", r);
-+        if (rec->count <= 0)
-+            FAIL("owned[%zu] has count=%d", r, rec->count);
-+        if (!rec->members)
-+            FAIL("owned[%zu] members is NULL (count=%d)", r, rec->count);
-+        if (rec->count > rec->cap)
-+            FAIL("owned[%zu] count %d > cap %d", r, rec->count, rec->cap);
-+        for (int k = 0; k < rec->count; k++) {
-+            uint32_t m = rec->members[k];
-+            if (m >= (uint32_t)n)
-+                FAIL("owned[%zu] member[%d]=%u out of range (body_count=%zu)",
-+                     r, k, m, n);
-+        }
-+        total_members += (size_t)rec->count;
-+    }
-+
-+    /* 2. sleeping_count must equal the sum of all owned records' member counts. */
-+    if (s->sleeping_count != total_members)
-+        FAIL("sleeping_count=%zu but total owned members=%zu",
-+             s->sleeping_count, total_members);
-+
-+    /* 3. For every body marked asleep, body_rec[body] must point to an owned
-+     *    record, and that record must list the body as a member. */
-+    for (size_t i = 0; i < n && i < s->cap; i++) {
-+        if (!s->asleep[i])
-+            continue;
-+        const tmb_island_rec *rec = s->body_rec[i];
-+        if (!rec)
-+            FAIL("body %zu is asleep but body_rec[%zu] is NULL", i, i);
-+        /* Verify rec is in owned[]. */
-+        int found_in_owned = 0;
-+        for (size_t r = 0; r < s->owned_count; r++) {
-+            if (s->owned[r] == rec) { found_in_owned = 1; break; }
-+        }
-+        if (!found_in_owned)
-+            FAIL("body %zu body_rec points to record not in owned[]", i);
-+        /* Verify body i appears in rec->members. */
-+        int found_in_members = 0;
-+        for (int k = 0; k < rec->count; k++) {
-+            if (rec->members[k] == (uint32_t)i) { found_in_members = 1; break; }
-+        }
-+        if (!found_in_members)
-+            FAIL("body %zu is asleep, body_rec points to record that does "
-+                 "not list it as a member", i);
-+    }
-+
-+    /* 4. No two owned records may share a members[] allocation (catches shallow-
-+     *    copy aliasing: if *new = *old was used, both would point to the same
-+     *    heap block and freeing one would leave the other dangling). */
-+    for (size_t r = 0; r < s->owned_count; r++) {
-+        for (size_t q = r + 1; q < s->owned_count; q++) {
-+            if (s->owned[r]->members == s->owned[q]->members)
-+                FAIL("owned[%zu] and owned[%zu] share members[] allocation "
-+                     "(shallow-copy aliasing)", r, q);
-+        }
-+    }
-+
-+#undef FAIL
-+    return 0;
-+}
-diff --git a/src/world.c b/src/world.c
-index c44d986..0179e73 100644
---- a/src/world.c
-+++ b/src/world.c
-@@ -7,6 +7,8 @@
- #include "tumble/joints_ext.h"
- #include "tumble/contact_events.h"
- 
-+#include <assert.h>
-+#include <stdio.h>
- #include <stdlib.h>
- #include <string.h>
- 
-@@ -45,6 +47,7 @@ uint32_t tmb_world_remove_body(tmb_world *w, uint32_t i)
-     uint32_t last = (uint32_t)(w->body_count - 1);
-     if (w->enable_sleeping && w->sleep)
-         tmb_sleep_on_remove(w, i, last);
-+
-     if (i != last)
-         w->bodies[i] = w->bodies[last];
-     w->body_count--;
-@@ -64,6 +67,21 @@ uint32_t tmb_world_remove_body(tmb_world *w, uint32_t i)
-         w->body_cap = 0;
-     }
- 
-+    /* Validate sleep-system ownership invariants after the full remove
-+     * (body array is compacted; body indices in island records are now
-+     * stable until the next remove).  Catches aliasing bugs early. */
-+#ifndef NDEBUG
-+    if (w->enable_sleeping && w->sleep) {
-+        char errmsg[256];
-+        errmsg[0] = '\0';
-+        int rc = tmb_sleep_validate(w, errmsg, sizeof(errmsg));
-+        if (rc != 0) {
-+            fprintf(stderr, "tmb_sleep_validate failed: %s\n", errmsg);
-+            assert(0 && "sleep system inconsistent after remove");
-+        }
-+    }
-+#endif
-+
-     return i;
- }
- 
-diff --git a/tests/test_sleep_records.c b/tests/test_sleep_records.c
-new file mode 100644
-index 0000000..927f126
---- /dev/null
-+++ b/tests/test_sleep_records.c
-@@ -0,0 +1,218 @@
-+/* Unit tests for the island-sleep record lifecycle, especially the ownership
-+ * invariants around tmb_sleep_on_remove.
-+ *
-+ * The regression scenario that must be covered:
-+ *   1. Let two or more dynamic bodies settle into a sleeping island.
-+ *   2. Remove one body from the island while the world still has others.
-+ *   3. Verify that the surviving record has its own independent members[]
-+ *      allocation (no aliasing with the freed original).
-+ *   4. Wake the surviving island and confirm all member indices are valid.
-+ *   5. Validate the full sleep system after every mutation. */
-+
-+#include "tumble/tumble.h"
-+#include "tumble/island_sleep.h"
-+#include "tumble/warmstart.h"
-+
-+#include "tttest.h"
-+#include <string.h>
-+
-+/* ---- helpers ---- */
-+
-+static tmb_world make_world(void)
-+{
-+    tmb_world w;
-+    tmb_world_init(&w);
-+    w.gravity        = tmb_v2(0.0f, -10.0f);
-+    w.enable_sleeping = 1;
-+    return w;
-+}
-+
-+static uint32_t add_box(tmb_world *w, float x, float y)
-+{
-+    tmb_body b;
-+    tmb_body_init(&b, TMB_BODY_DYNAMIC, tmb_shape_box(0.5f, 0.5f), tmb_v2(x, y));
-+    return tmb_world_add_body(w, &b);
-+}
-+
-+static void add_floor(tmb_world *w)
-+{
-+    tmb_body f;
-+    tmb_body_init(&f, TMB_BODY_STATIC, tmb_shape_box(20.0f, 1.0f), tmb_v2(0, -3));
-+    tmb_world_add_body(w, &f);
-+}
-+
-+static void step_n(tmb_world *w, int n)
-+{
-+    for (int i = 0; i < n; i++)
-+        tmb_world_step(w, 1.0f / 60.0f);
-+}
-+
-+static int validate(const tmb_world *w)
-+{
-+    char msg[256];
-+    int rc = tmb_sleep_validate(w, msg, sizeof(msg));
-+    if (rc != 0)
-+        fprintf(stderr, "  validate: %s\n", msg);
-+    return rc;
-+}
-+
-+/* ---- tests ---- */
-+
-+/* Two bodies settle into a single sleeping island; we remove one and confirm
-+ * the survivor's record is self-consistent (no aliased members pointer). */
-+static int test_remove_from_two_body_island(void)
-+{
-+    tmb_world w = make_world();
-+    add_floor(&w);
-+    uint32_t a = add_box(&w, -0.5f, 1.0f);
-+    uint32_t b = add_box(&w,  0.5f, 1.0f);
-+
-+    /* Run long enough for both bodies to settle and sleep. */
-+    step_n(&w, 120);
-+
-+    CHECK(tmb_body_is_sleeping(&w, a));
-+    CHECK(tmb_body_is_sleeping(&w, b));
-+    CHECK(validate(&w) == 0);
-+
-+    /* Remove body a while both are sleeping. */
-+    tmb_world_remove_body(&w, a);
-+
-+    /* After the removal the system must still be valid. */
-+    CHECK(validate(&w) == 0);
-+
-+    /* The surviving body should still be asleep (it was not disturbed). */
-+    /* Note: after swap-pop body b may have moved to a different slot; use
-+     * body_count to find it (only 2 bodies remain: floor + 1 dynamic). */
-+    size_t bc = tmb_world_body_count(&w);
-+    CHECK(bc == 2);
-+
-+    /* Step once more to verify the engine does not crash when the surviving
-+     * sleeping island is touched (e.g. during wake logic). */
-+    step_n(&w, 5);
-+    CHECK(validate(&w) == 0);
-+
-+    tmb_world_free(&w);
-+    return 0;
-+}
-+
-+/* Three bodies in one island; remove the middle one (swap-pop moves the
-+ * last into its slot) and confirm all back-pointers are updated correctly. */
-+static int test_remove_middle_of_three(void)
-+{
-+    tmb_world w = make_world();
-+    add_floor(&w);
-+    uint32_t a = add_box(&w, -1.0f, 1.0f);
-+    uint32_t b = add_box(&w,  0.0f, 1.0f);
-+    uint32_t c = add_box(&w,  1.0f, 1.0f);
-+    (void)a; (void)b; (void)c;
-+
-+    step_n(&w, 120);
-+
-+    /* All dynamic bodies should be sleeping by now. */
-+    for (uint32_t i = 1; i < (uint32_t)tmb_world_body_count(&w); i++)
-+        CHECK(tmb_body_is_sleeping(&w, i));
-+
-+    CHECK(validate(&w) == 0);
-+
-+    /* Remove the second dynamic body (index 2 = b). */
-+    tmb_world_remove_body(&w, 2);
-+    CHECK(validate(&w) == 0);
-+
-+    step_n(&w, 10);
-+    CHECK(validate(&w) == 0);
-+
-+    tmb_world_free(&w);
-+    return 0;
-+}
-+
-+/* Remove all members of a sleeping island one by one and confirm the system
-+ * reaches a clean empty state each time. */
-+static int test_drain_island(void)
-+{
-+    tmb_world w = make_world();
-+    add_floor(&w);
-+    for (int i = 0; i < 4; i++)
-+        add_box(&w, (float)i * 0.8f - 1.2f, 1.0f);
-+
-+    step_n(&w, 150);
-+    CHECK(validate(&w) == 0);
-+
-+    /* Remove dynamic bodies one at a time until none remain. */
-+    while (tmb_world_body_count(&w) > 1) {
-+        tmb_world_remove_body(&w, 1);  /* always remove the first dynamic body */
-+        CHECK(validate(&w) == 0);
-+    }
-+
-+    step_n(&w, 5);
-+    CHECK(validate(&w) == 0);
-+
-+    tmb_world_free(&w);
-+    return 0;
-+}
-+
-+/* Waking a sleeping island after a remove must not dereference the freed
-+ * members array; this test specifically exercises wake_island on the record
-+ * produced by tmb_sleep_on_remove. */
-+static int test_wake_after_remove(void)
-+{
-+    tmb_world w = make_world();
-+    add_floor(&w);
-+    add_box(&w, -0.4f, 1.0f);
-+    add_box(&w,  0.4f, 1.0f);
-+    add_box(&w,  0.0f, 2.2f);
-+
-+    step_n(&w, 150);
-+    CHECK(validate(&w) == 0);
-+
-+    /* Remove one member to produce a two-body survivor record. */
-+    tmb_world_remove_body(&w, 1);
-+    CHECK(validate(&w) == 0);
-+
-+    /* Drop a heavy box from above to land on the survivors and wake them. */
-+    tmb_body heavy;
-+    tmb_body_init(&heavy, TMB_BODY_DYNAMIC, tmb_shape_box(1.0f, 1.0f),
-+                  tmb_v2(0.0f, 8.0f));
-+    tmb_world_add_body(&w, &heavy);
-+
-+    /* The impact should wake the sleeping island; running many steps must
-+     * not crash even though one body was removed. */
-+    step_n(&w, 60);
-+    CHECK(validate(&w) == 0);
-+
-+    tmb_world_free(&w);
-+    return 0;
-+}
-+
-+/* Validate that sleeping_count stays consistent across many add/remove/sleep
-+ * cycles. */
-+static int test_sleeping_count_consistency(void)
-+{
-+    tmb_world w = make_world();
-+    add_floor(&w);
-+    for (int i = 0; i < 6; i++)
-+        add_box(&w, (float)i - 2.5f, 1.5f);
-+
-+    for (int round = 0; round < 3; round++) {
-+        step_n(&w, 100);
-+        CHECK(validate(&w) == 0);
-+
-+        if (tmb_world_body_count(&w) > 2) {
-+            tmb_world_remove_body(&w, 1);
-+            CHECK(validate(&w) == 0);
-+        }
-+    }
-+
-+    tmb_world_free(&w);
-+    return 0;
-+}
-+
-+int main(void)
-+{
-+    int r = 0;
-+    r |= test_remove_from_two_body_island();
-+    r |= test_remove_middle_of_three();
-+    r |= test_drain_island();
-+    r |= test_wake_after_remove();
-+    r |= test_sleeping_count_consistency();
-+    TT_DONE();
-+}
