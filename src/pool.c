@@ -1,6 +1,7 @@
 #include "tumble/pool.h"
 
 #include <stdlib.h>
+#include <string.h>
 
 struct tmb_pool_chunk {
     tmb_pool_chunk *next;
@@ -65,6 +66,14 @@ void *tmb_pool_alloc(tmb_pool *p)
     void *block = p->free_list;
     p->free_list = *(void **)block;
     p->live++;
+    return block;
+}
+
+void *tmb_pool_calloc(tmb_pool *p)
+{
+    void *block = tmb_pool_alloc(p);
+    if (block)
+        memset(block, 0, p->block_size);
     return block;
 }
 

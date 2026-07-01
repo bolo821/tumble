@@ -2,47 +2,79 @@
 
 #include <stdlib.h>
 
-void tmb_quadtree_init(tmb_quadtree *q, tmb_aabb bounds, int max_depth)
+/* Every node -- the root and all children -- is carved from q->nodes, a
+ * fixed-size block pool. This keeps node lifetime under a single owner: the
+ * pool. Releasing a node returns its block to the pool's free list; freeing
+ * the pool reclaims everything at once. Because the pool owns the memory, the
+ * tree must never keep a pointer to a released node -- clear() therefore both
+ * releases the child subtrees AND clears the parent's divided flag and child
+ * pointers, so no traversal can follow a dangling link. */
+
+static tmb_qt_node *node_new(tmb_quadtree *q, tmb_aabb bounds)
 {
-    q->root = (tmb_qt_node *)calloc(1, sizeof(tmb_qt_node));
-    if (q->root)
-        q->root->bounds = bounds;
-    q->max_depth = max_depth > 0 ? max_depth : 8;
-    q->size = 0;
+    tmb_qt_node *n = (tmb_qt_node *)tmb_pool_calloc(&q->nodes);
+    if (n)
+        n->bounds = bounds;
+    return n;
 }
 
-static void free_node(tmb_qt_node *n)
+/* Recursively release a subtree back to the pool (post-order). */
+static void release_subtree(tmb_quadtree *q, tmb_qt_node *n)
 {
     if (!n)
         return;
     if (n->divided)
-        for (int i = 0; i < 4; i++)
-            free_node(n->kids[i]);
-    free(n);
+        for (int i = 0; i < 4; i++) {
+            release_subtree(q, n->kids[i]);
+            n->kids[i] = NULL;
+        }
+    n->divided = 0;
+    tmb_pool_release(&q->nodes, n);
+}
+
+/* Drop a node's children (if any) and turn it back into a leaf, releasing the
+ * child blocks to the pool. Leaves no dangling pointers behind. */
+static void make_leaf(tmb_quadtree *q, tmb_qt_node *n)
+{
+    if (!n || !n->divided)
+        return;
+    for (int i = 0; i < 4; i++) {
+        release_subtree(q, n->kids[i]);
+        n->kids[i] = NULL;
+    }
+    n->divided = 0;
+}
+
+void tmb_quadtree_init(tmb_quadtree *q, tmb_aabb bounds, int max_depth)
+{
+    tmb_pool_init(&q->nodes, sizeof(tmb_qt_node), 64);
+    q->root = node_new(q, bounds);
+    q->max_depth = max_depth > 0 ? max_depth : 8;
+    q->size = 0;
 }
 
 void tmb_quadtree_free(tmb_quadtree *q)
 {
-    free_node(q->root);
+    /* The pool owns all node memory, so a single pool_free reclaims the whole
+     * tree; there is no per-node walk that could double-free. */
+    tmb_pool_free(&q->nodes);
     q->root = NULL;
     q->size = 0;
 }
 
-/* Empty the tree for reuse across frames without giving up the root
- * allocation. The children accumulated last frame are reclaimed and the
- * root's item list is emptied, so the next batch of inserts starts fresh but
- * the common case (a shallow tree) avoids reallocating the root each frame. */
+/* Empty the tree for reuse across frames without giving up the root node. The
+ * children accumulated last frame are released back to the pool and the root
+ * is turned back into an empty leaf, so no stale child pointer survives. */
 void tmb_quadtree_clear(tmb_quadtree *q)
 {
     if (!q || !q->root)
         return;
-    for (int i = 0; i < 4; i++)
-        free_node(q->root->kids[i]);
+    make_leaf(q, q->root);
     q->root->count = 0;
     q->size = 0;
 }
 
-static int subdivide(tmb_qt_node *n)
+static int subdivide(tmb_quadtree *q, tmb_qt_node *n)
 {
     tmb_vec2 c = tmb_aabb_center(n->bounds);
     tmb_aabb q0 = {{n->bounds.min.x, c.y}, {c.x, n->bounds.max.y}};
@@ -51,17 +83,22 @@ static int subdivide(tmb_qt_node *n)
     tmb_aabb q3 = {{c.x, n->bounds.min.y}, {n->bounds.max.x, c.y}};
     tmb_aabb boxes[4] = {q0, q1, q2, q3};
     for (int i = 0; i < 4; i++) {
-        n->kids[i] = (tmb_qt_node *)calloc(1, sizeof(tmb_qt_node));
-        if (!n->kids[i])
+        n->kids[i] = node_new(q, boxes[i]);
+        if (!n->kids[i]) {
+            /* roll back any children created so far to avoid a partial split */
+            for (int j = 0; j < i; j++) {
+                tmb_pool_release(&q->nodes, n->kids[j]);
+                n->kids[j] = NULL;
+            }
             return -1;
-        n->kids[i]->bounds = boxes[i];
+        }
     }
     n->divided = 1;
     return 0;
 }
 
-static int insert_node(tmb_qt_node *n, tmb_vec2 p, uint32_t id, int depth,
-                       int max_depth)
+static int insert_node(tmb_quadtree *q, tmb_qt_node *n, tmb_vec2 p, uint32_t id,
+                       int depth, int max_depth)
 {
     if (!tmb_aabb_contains(n->bounds, p))
         return 0;
@@ -75,10 +112,10 @@ static int insert_node(tmb_qt_node *n, tmb_vec2 p, uint32_t id, int depth,
         /* at max depth: overwrite policy is to drop; report not stored */
         return 0;
     }
-    if (!n->divided && subdivide(n) != 0)
+    if (!n->divided && subdivide(q, n) != 0)
         return 0;
     for (int i = 0; i < 4; i++)
-        if (insert_node(n->kids[i], p, id, depth + 1, max_depth))
+        if (insert_node(q, n->kids[i], p, id, depth + 1, max_depth))
             return 1;
     return 0;
 }
@@ -87,7 +124,7 @@ int tmb_quadtree_insert(tmb_quadtree *q, tmb_vec2 p, uint32_t id)
 {
     if (!q->root)
         return 0;
-    int ok = insert_node(q->root, p, id, 0, q->max_depth);
+    int ok = insert_node(q, q->root, p, id, 0, q->max_depth);
     if (ok)
         q->size++;
     return ok;

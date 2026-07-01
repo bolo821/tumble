@@ -26,6 +26,8 @@ typedef struct {
 int tmb_pool_init(tmb_pool *p, size_t block_size, size_t blocks_per_chunk);
 void tmb_pool_free(tmb_pool *p);
 void *tmb_pool_alloc(tmb_pool *p);
+/* Like tmb_pool_alloc but the returned block is zero-filled. */
+void *tmb_pool_calloc(tmb_pool *p);
 void tmb_pool_release(tmb_pool *p, void *block);
 /* Release every block at once without freeing the backing chunks. */
 void tmb_pool_reset(tmb_pool *p);

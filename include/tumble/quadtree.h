@@ -2,6 +2,7 @@
 #define TUMBLE_QUADTREE_H
 
 #include "tumble/aabb.h"
+#include "tumble/pool.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -35,6 +36,7 @@ typedef struct {
     tmb_qt_node *root;
     int max_depth;
     size_t size;
+    tmb_pool nodes; /* owns every node's memory (root and children alike) */
 } tmb_quadtree;
 
 void tmb_quadtree_init(tmb_quadtree *q, tmb_aabb bounds, int max_depth);
