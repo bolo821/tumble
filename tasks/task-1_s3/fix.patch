@@ -1,0 +1,414 @@
+diff --git a/include/tumble/buffer.h b/include/tumble/buffer.h
+index 816345e..c88c99d 100644
+--- a/include/tumble/buffer.h
++++ b/include/tumble/buffer.h
+@@ -24,6 +24,13 @@ int tmb_buf_write(tmb_buf *b, const void *src, size_t n);
+ int tmb_buf_puts(tmb_buf *b, const char *s);
+ int tmb_buf_printf(tmb_buf *b, const char *fmt, ...);
+ 
++/* Drop the current contents but keep the allocation for reuse. Also clears a
++ * sticky OOM flag so a buffer can be reused after a failed grow. */
++void tmb_buf_reset(tmb_buf *b);
++/* Ensure a trailing NUL and return the contents as a C string, or NULL if the
++ * terminator could not be reserved. The NUL is not counted in `len`. */
++char *tmb_buf_cstr(tmb_buf *b);
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/include/tumble/scene_parse.h b/include/tumble/scene_parse.h
+new file mode 100644
+index 0000000..1c67a3a
+--- /dev/null
++++ b/include/tumble/scene_parse.h
+@@ -0,0 +1,74 @@
++#ifndef TUMBLE_SCENE_PARSE_H
++#define TUMBLE_SCENE_PARSE_H
++
++#include <stddef.h>
++
++#include "tumble/buffer.h"
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++/* Bounded line reader and tokenizer for the text scene format.
++ *
++ * The text loader assembles one *logical* line at a time, following trailing
++ * backslash continuations, then splits it into whitespace-separated tokens.
++ * Both steps are bounded so that a hostile or malformed input can never drive
++ * an out-of-bounds write or unbounded memory growth:
++ *
++ *   - a logical line may not exceed TMB_SCENE_MAX_LINE bytes (cumulative,
++ *     across every continued segment),
++ *   - at most TMB_SCENE_MAX_CONT physical lines may be joined into one
++ *     logical line, and
++ *   - a logical line splits into at most TMB_SCENE_MAX_TOKENS tokens.
++ *
++ * The assembled line lives in a caller-owned growable tmb_buf, so there is no
++ * fixed-size stack or heap buffer to overrun regardless of the input. */
++
++#define TMB_SCENE_MAX_LINE   65536u
++#define TMB_SCENE_MAX_CONT    4096u
++#define TMB_SCENE_MAX_TOKENS  4096u
++
++typedef enum {
++    TMB_LINE_OK = 0,   /* a logical line was assembled into `out` */
++    TMB_LINE_END,      /* no more input */
++    TMB_LINE_OVERFLOW  /* a cap was hit; the offending run was consumed+skipped */
++} tmb_line_status;
++
++/* Cursor over an in-memory text blob. */
++typedef struct {
++    const char *text;
++    size_t len;
++    size_t pos;
++} tmb_line_reader;
++
++void tmb_line_reader_init(tmb_line_reader *r, const char *text, size_t len);
++
++/* Assemble the next logical line into `out` (which is reset first). On
++ * TMB_LINE_OK, `out` holds the NUL-terminated line and tmb_buf_cstr(out) is a
++ * valid C string. On TMB_LINE_OVERFLOW the offending physical-line run has
++ * been consumed and the caller should simply continue. TMB_LINE_END signals
++ * end of input. */
++tmb_line_status tmb_line_reader_next(tmb_line_reader *r, tmb_buf *out);
++
++/* In-place whitespace tokenizer. `tok` entries point into the mutable line
++ * buffer; separators are overwritten with '\0'. The token array grows as
++ * needed and is owned by the tmb_tokens object. */
++typedef struct {
++    char **tok;
++    size_t n;
++    size_t cap;
++} tmb_tokens;
++
++void tmb_tokens_init(tmb_tokens *t);
++void tmb_tokens_free(tmb_tokens *t);
++
++/* Split `line` in place into `t` (reset first). Returns 0 on success or -1 on
++ * allocation failure. Stops after TMB_SCENE_MAX_TOKENS tokens. */
++int tmb_tokens_split(tmb_tokens *t, char *line);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* TUMBLE_SCENE_PARSE_H */
+diff --git a/src/buffer.c b/src/buffer.c
+index bc7bd09..bceaf0d 100644
+--- a/src/buffer.c
++++ b/src/buffer.c
+@@ -70,6 +70,20 @@ int tmb_buf_write(tmb_buf *b, const void *src, size_t n)
+ 
+ int tmb_buf_puts(tmb_buf *b, const char *s) { return tmb_buf_write(b, s, strlen(s)); }
+ 
++void tmb_buf_reset(tmb_buf *b)
++{
++    b->len = 0;
++    b->oom = 0;
++}
++
++char *tmb_buf_cstr(tmb_buf *b)
++{
++    if (tmb_buf_reserve(b, 1) != 0)
++        return NULL;
++    b->data[b->len] = '\0';
++    return (char *)b->data;
++}
++
+ int tmb_buf_printf(tmb_buf *b, const char *fmt, ...)
+ {
+     va_list ap, ap2;
+diff --git a/src/scene_parse.c b/src/scene_parse.c
+new file mode 100644
+index 0000000..c65a368
+--- /dev/null
++++ b/src/scene_parse.c
+@@ -0,0 +1,127 @@
++#include "tumble/scene_parse.h"
++
++#include <stdlib.h>
++#include <string.h>
++
++static int is_sep(char c) { return c == ' ' || c == '\t' || c == '\r'; }
++
++void tmb_line_reader_init(tmb_line_reader *r, const char *text, size_t len)
++{
++    r->text = text;
++    r->len = len;
++    r->pos = 0;
++}
++
++/* Scan one physical line starting at r->pos. Advances r->pos past the newline
++ * (if any). Returns the segment [*start, *start + *n) with any trailing CR
++ * trimmed, and sets *continued if the segment ended in a backslash (which is
++ * excluded from *n). */
++static void scan_physical(tmb_line_reader *r, size_t *start, size_t *n,
++                          int *continued)
++{
++    size_t s = r->pos;
++    size_t eol = r->pos;
++    while (eol < r->len && r->text[eol] != '\n')
++        eol++;
++    size_t len = eol - s;
++    r->pos = (eol < r->len) ? eol + 1 : eol;
++
++    if (len > 0 && r->text[s + len - 1] == '\r')
++        len--;
++
++    int cont = (len > 0 && r->text[s + len - 1] == '\\');
++    if (cont)
++        len--;
++
++    *start = s;
++    *n = len;
++    *continued = cont;
++}
++
++tmb_line_status tmb_line_reader_next(tmb_line_reader *r, tmb_buf *out)
++{
++    if (r->pos >= r->len)
++        return TMB_LINE_END;
++
++    tmb_buf_reset(out);
++
++    int continued;
++    int overflow = 0;
++    size_t joined = 0;
++
++    do {
++        size_t start, n;
++        scan_physical(r, &start, &n, &continued);
++
++        /* Enforce the cumulative cap *before* copying so a run of continued
++         * segments can never grow the logical line without bound. This is the
++         * check the fixed-buffer implementation was missing: it validated each
++         * segment in isolation while appending at an ever-growing offset. */
++        if (!overflow) {
++            if (out->len + n > TMB_SCENE_MAX_LINE)
++                overflow = 1;
++            else if (tmb_buf_write(out, r->text + start, n) != 0)
++                overflow = 1; /* allocation failure: treat as skip */
++        }
++
++        if (++joined > TMB_SCENE_MAX_CONT)
++            overflow = 1;
++
++        /* Keep consuming the physical lines of a continued run even after an
++         * overflow so the caller resumes cleanly on the next logical line. */
++    } while (continued && r->pos < r->len);
++
++    if (overflow)
++        return TMB_LINE_OVERFLOW;
++
++    if (!tmb_buf_cstr(out))
++        return TMB_LINE_OVERFLOW;
++    return TMB_LINE_OK;
++}
++
++void tmb_tokens_init(tmb_tokens *t)
++{
++    t->tok = NULL;
++    t->n = 0;
++    t->cap = 0;
++}
++
++void tmb_tokens_free(tmb_tokens *t)
++{
++    free(t->tok);
++    tmb_tokens_init(t);
++}
++
++static int tokens_push(tmb_tokens *t, char *s)
++{
++    if (t->n == t->cap) {
++        size_t cap = t->cap ? t->cap * 2 : 16;
++        char **nt = (char **)realloc(t->tok, cap * sizeof(*nt));
++        if (!nt)
++            return -1;
++        t->tok = nt;
++        t->cap = cap;
++    }
++    t->tok[t->n++] = s;
++    return 0;
++}
++
++int tmb_tokens_split(tmb_tokens *t, char *line)
++{
++    t->n = 0;
++    char *p = line;
++    while (*p && t->n < TMB_SCENE_MAX_TOKENS) {
++        while (*p && is_sep(*p))
++            p++;
++        if (!*p)
++            break;
++        char *start = p;
++        while (*p && !is_sep(*p))
++            p++;
++        if (*p)
++            *p++ = '\0';
++        if (tokens_push(t, start) != 0)
++            return -1;
++    }
++    return 0;
++}
+diff --git a/src/scene_text.c b/src/scene_text.c
+index 0722858..f89af86 100644
+--- a/src/scene_text.c
++++ b/src/scene_text.c
+@@ -1,4 +1,6 @@
+ #include "tumble/tumble.h"
++#include "tumble/buffer.h"
++#include "tumble/scene_parse.h"
+ 
+ #include <stdlib.h>
+ #include <string.h>
+@@ -18,35 +20,13 @@
+  * backslash is dropped and the following line is appended, so one logical
+  * directive can be spread over several source lines for readability.
+  *
++ * Line assembly and tokenization are handled by the bounded reader in
++ * scene_parse.c, so no fixed-size buffer can be overrun regardless of how the
++ * input is split across continued lines.
++ *
+  * Defensive: every field is checked, unknown directives are skipped, counts
+  * are capped. */
+ 
+-#define MAXTOK 80
+-
+-typedef struct {
+-    char *tok[MAXTOK];
+-    int n;
+-} line_toks;
+-
+-static int is_sep(char c) { return c == ' ' || c == '\t' || c == '\r'; }
+-
+-static void tokenize(char *line, line_toks *lt)
+-{
+-    lt->n = 0;
+-    char *p = line;
+-    while (*p && lt->n < MAXTOK) {
+-        while (*p && is_sep(*p))
+-            p++;
+-        if (!*p)
+-            break;
+-        lt->tok[lt->n++] = p;
+-        while (*p && !is_sep(*p))
+-            p++;
+-        if (*p)
+-            *p++ = '\0';
+-    }
+-}
+-
+ static int body_type_of(const char *s) /* default dynamic */
+ {
+     if (s && strcmp(s, "static") == 0)
+@@ -67,7 +47,7 @@ static tmb_err add_with(tmb_world *w, tmb_shape shape, int type, float x,
+     return tmb_world_add_body(w, &b) == UINT32_MAX ? TMB_ERR_OOM : TMB_OK;
+ }
+ 
+-static tmb_err handle(tmb_world *w, line_toks *lt)
++static tmb_err handle(tmb_world *w, const tmb_tokens *lt)
+ {
+     if (lt->n == 0 || lt->tok[0][0] == '#')
+         return TMB_OK;
+@@ -110,7 +90,8 @@ static tmb_err handle(tmb_world *w, line_toks *lt)
+         int count = atoi(lt->tok[3]);
+         if (count < 3 || count > TMB_MAX_POLY_VERTS)
+             return TMB_OK;
+-        if (lt->n < 4 + 2 * count)
++        size_t need = (size_t)4 + (size_t)2 * (size_t)count;
++        if (lt->n < need)
+             return TMB_ERR_PARSE;
+         tmb_vec2 v[TMB_MAX_POLY_VERTS];
+         for (int i = 0; i < count; i++)
+@@ -119,9 +100,8 @@ static tmb_err handle(tmb_world *w, line_toks *lt)
+         tmb_shape s;
+         if (tmb_shape_polygon(&s, v, count) != TMB_OK)
+             return TMB_OK; /* skip a degenerate polygon */
+-        int type = (lt->n > 4 + 2 * count)
+-                       ? body_type_of(lt->tok[4 + 2 * count])
+-                       : TMB_BODY_DYNAMIC;
++        int type = (lt->n > need) ? body_type_of(lt->tok[need])
++                                  : TMB_BODY_DYNAMIC;
+         return add_with(w, s, type, (float)atof(lt->tok[1]),
+                         (float)atof(lt->tok[2]), 0.0f, 1.0f);
+     }
+@@ -144,44 +124,39 @@ static tmb_err handle(tmb_world *w, line_toks *lt)
+ 
+ tmb_err tmb_load_scene_text(const char *text, size_t len, tmb_world *out)
+ {
+-    char buf[4096];
+-    size_t pos = 0;
+-    while (pos < len) {
+-        /* Assemble one logical line, following backslash continuations. */
+-        size_t total = 0;
+-        int continued;
+-        do {
+-            size_t start = pos;
+-            size_t eol = pos;
+-            while (eol < len && text[eol] != '\n')
+-                eol++;
+-            size_t n = eol - start;
+-            pos = eol + 1;
+-
+-            /* Drop a trailing CR from CRLF line endings. */
+-            if (n > 0 && text[start + n - 1] == '\r')
+-                n--;
++    tmb_line_reader r;
++    tmb_line_reader_init(&r, text, len);
+ 
+-            /* A trailing backslash continues onto the next physical line; the
+-             * backslash itself is not part of the logical line. */
+-            continued = (n > 0 && text[start + n - 1] == '\\');
+-            if (continued)
+-                n--;
++    tmb_buf line;
++    tmb_buf_init(&line);
++    tmb_tokens toks;
++    tmb_tokens_init(&toks);
+ 
+-            /* Copy this segment onto the end of the logical line. A segment
+-             * longer than the buffer cannot be represented, so it is dropped. */
+-            if (n < sizeof(buf)) {
+-                memcpy(buf + total, text + start, n);
+-                total += n;
+-            }
+-        } while (continued && pos <= len);
++    tmb_err ret = TMB_OK;
++    for (;;) {
++        tmb_line_status st = tmb_line_reader_next(&r, &line);
++        if (st == TMB_LINE_END)
++            break;
++        if (st == TMB_LINE_OVERFLOW)
++            continue; /* skip an over-long logical line */
+ 
+-        buf[total] = '\0';
+-        line_toks lt;
+-        tokenize(buf, &lt);
+-        tmb_err e = handle(out, &lt);
+-        if (e == TMB_ERR_OOM)
+-            return e;
++        char *cstr = tmb_buf_cstr(&line);
++        if (!cstr) {
++            ret = TMB_ERR_OOM;
++            break;
++        }
++        if (tmb_tokens_split(&toks, cstr) != 0) {
++            ret = TMB_ERR_OOM;
++            break;
++        }
++        tmb_err e = handle(out, &toks);
++        if (e == TMB_ERR_OOM) {
++            ret = e;
++            break;
++        }
+     }
+-    return TMB_OK;
++
++    tmb_tokens_free(&toks);
++    tmb_buf_free(&line);
++    return ret;
+ }

@@ -1,0 +1,70 @@
+INFO: Running with entropic power schedule (0xFF, 100).
+INFO: Seed: 1120656075
+INFO: Loaded 1 modules   (13251 inline 8-bit counters): 13251 [0x5617dc899c40, 0x5617dc89d003), 
+INFO: Loaded 1 PC tables (13251 PCs): 13251 [0x5617dc89d008,0x5617dc8d0c38), 
+/tmp/s3_t1_buggy/f: Running 1 inputs 1 time(s) each.
+Running: tasks/task-1_s3/poc.bin
+=================================================================
+==1901548==ERROR: AddressSanitizer: stack-buffer-overflow on address 0x7fff14679f40 at pc 0x5617dc73ce7a bp 0x7fff14676bd0 sp 0x7fff146763a0
+WRITE of size 100 at 0x7fff14679f40 thread T0
+    #0 0x5617dc73ce79 in __asan_memcpy (/tmp/s3_t1_buggy/f+0x167e79) (BuildId: eac30eda48b51e91cf7752bf1d05946e0e8f6974)
+    #1 0x5617dc7eafa3 in tmb_load_scene_text /root/bolo/fenrir/Fenrir/tumble/src/scene_text.c:174:17
+    #2 0x5617dc822144 in LLVMFuzzerTestOneInput /root/bolo/fenrir/Fenrir/tumble/fuzz/scene_text_fuzzer.c:18:9
+    #3 0x5617dc6a1423 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) (/tmp/s3_t1_buggy/f+0xcc423) (BuildId: eac30eda48b51e91cf7752bf1d05946e0e8f6974)
+    #4 0x5617dc68b19f in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) (/tmp/s3_t1_buggy/f+0xb619f) (BuildId: eac30eda48b51e91cf7752bf1d05946e0e8f6974)
+    #5 0x5617dc690ef6 in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) (/tmp/s3_t1_buggy/f+0xbbef6) (BuildId: eac30eda48b51e91cf7752bf1d05946e0e8f6974)
+    #6 0x5617dc6bad12 in main (/tmp/s3_t1_buggy/f+0xe5d12) (BuildId: eac30eda48b51e91cf7752bf1d05946e0e8f6974)
+    #7 0x7f428454cd8f  (/lib/x86_64-linux-gnu/libc.so.6+0x29d8f) (BuildId: 095c7ba148aeca81668091f718047078d57efddb)
+    #8 0x7f428454ce3f in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x29e3f) (BuildId: 095c7ba148aeca81668091f718047078d57efddb)
+    #9 0x5617dc685a64 in _start (/tmp/s3_t1_buggy/f+0xb0a64) (BuildId: eac30eda48b51e91cf7752bf1d05946e0e8f6974)
+
+Address 0x7fff14679f40 is located in stack of thread T0 at offset 13152 in frame
+    #0 0x5617dc7ea53f in tmb_load_scene_text /root/bolo/fenrir/Fenrir/tumble/src/scene_text.c:146
+
+  This frame has 11 object(s):
+    [32, 1152) 'b.i138' (line 62)
+    [1280, 2316) 'agg.tmp.i137' (line 68)
+    [2448, 3568) 'b.i129' (line 62)
+    [3696, 4732) 'agg.tmp419.i128' (line 68)
+    [4864, 5900) 'agg.tmp.i' (line 143)
+    [6032, 7068) 'agg.tmp419.i' (line 143)
+    [7200, 7712) 'v.i' (line 115)
+    [7776, 8812) 's.i' (line 119)
+    [8944, 9016) 'j.i' (line 129)
+    [9056, 13152) 'buf' (line 147) <== Memory access at offset 13152 overflows this variable
+    [13280, 13928) 'lt' (line 180)
+HINT: this may be a false positive if your program uses some custom stack unwind mechanism, swapcontext or vfork
+      (longjmp and C++ exceptions *are* supported)
+SUMMARY: AddressSanitizer: stack-buffer-overflow (/tmp/s3_t1_buggy/f+0x167e79) (BuildId: eac30eda48b51e91cf7752bf1d05946e0e8f6974) in __asan_memcpy
+Shadow bytes around the buggy address:
+  0x1000628c7390: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x1000628c73a0: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x1000628c73b0: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x1000628c73c0: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x1000628c73d0: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+=>0x1000628c73e0: 00 00 00 00 00 00 00 00[f2]f2 f2 f2 f2 f2 f2 f2
+  0x1000628c73f0: f2 f2 f2 f2 f2 f2 f2 f2 f8 f8 f8 f8 f8 f8 f8 f8
+  0x1000628c7400: f8 f8 f8 f8 f8 f8 f8 f8 f8 f8 f8 f8 f8 f8 f8 f8
+  0x1000628c7410: f8 f8 f8 f8 f8 f8 f8 f8 f8 f8 f8 f8 f8 f8 f8 f8
+  0x1000628c7420: f8 f8 f8 f8 f8 f8 f8 f8 f8 f8 f8 f8 f8 f8 f8 f8
+  0x1000628c7430: f8 f8 f8 f8 f8 f8 f8 f8 f8 f8 f8 f8 f8 f8 f8 f8
+Shadow byte legend (one shadow byte represents 8 application bytes):
+  Addressable:           00
+  Partially addressable: 01 02 03 04 05 06 07 
+  Heap left redzone:       fa
+  Freed heap region:       fd
+  Stack left redzone:      f1
+  Stack mid redzone:       f2
+  Stack right redzone:     f3
+  Stack after return:      f5
+  Stack use after scope:   f8
+  Global redzone:          f9
+  Global init order:       f6
+  Poisoned by user:        f7
+  Container overflow:      fc
+  Array cookie:            ac
+  Intra object redzone:    bb
+  ASan internal:           fe
+  Left alloca redzone:     ca
+  Right alloca redzone:    cb
+==1901548==ABORTING

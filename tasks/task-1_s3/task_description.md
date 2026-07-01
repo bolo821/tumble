@@ -1,0 +1,1 @@
+Stack buffer overflow in the text scene loader `tmb_load_scene_text` (`src/scene_text.c`), triggered by a directive split across many backslash-continued lines: each segment's length is checked individually but the segments are appended into a fixed 4 KB stack buffer at a cumulative offset, overrunning it.
