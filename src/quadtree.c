@@ -28,6 +28,20 @@ void tmb_quadtree_free(tmb_quadtree *q)
     q->size = 0;
 }
 
+/* Empty the tree for reuse across frames without giving up the root
+ * allocation. The children accumulated last frame are reclaimed and the
+ * root's item list is emptied, so the next batch of inserts starts fresh but
+ * the common case (a shallow tree) avoids reallocating the root each frame. */
+void tmb_quadtree_clear(tmb_quadtree *q)
+{
+    if (!q || !q->root)
+        return;
+    for (int i = 0; i < 4; i++)
+        free_node(q->root->kids[i]);
+    q->root->count = 0;
+    q->size = 0;
+}
+
 static int subdivide(tmb_qt_node *n)
 {
     tmb_vec2 c = tmb_aabb_center(n->bounds);

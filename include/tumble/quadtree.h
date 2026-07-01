@@ -39,6 +39,8 @@ typedef struct {
 
 void tmb_quadtree_init(tmb_quadtree *q, tmb_aabb bounds, int max_depth);
 void tmb_quadtree_free(tmb_quadtree *q);
+/* Empty the tree for reuse across frames without freeing the root node. */
+void tmb_quadtree_clear(tmb_quadtree *q);
 int tmb_quadtree_insert(tmb_quadtree *q, tmb_vec2 p, uint32_t id);
 size_t tmb_quadtree_query(const tmb_quadtree *q, tmb_aabb region, uint32_t *out,
                           size_t cap);
