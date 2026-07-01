@@ -49,10 +49,15 @@ uint32_t tmb_world_remove_body(tmb_world *w, uint32_t i)
 
     /* Compact the body buffer to the live count so heap tools catch
      * any subsystem that still references the old 'last' index.
-     * NOTE: callers must remap any cached body indices before this point. */
+     * NOTE: callers must remap any cached body indices before this point.
+     * When sleeping bodies remain the sleep system already covers the
+     * trailing slot, so compact one short to reclaim that page sooner. */
     if (w->body_count > 0) {
-        tmb_body *nb = (tmb_body *)realloc(w->bodies,
-                                           w->body_count * sizeof(*nb));
+        size_t compact = (w->enable_sleeping && w->sleep &&
+                          w->sleep->sleeping_count > 0 && w->body_count > 1)
+                             ? w->body_count - 1
+                             : w->body_count;
+        tmb_body *nb = (tmb_body *)realloc(w->bodies, compact * sizeof(*nb));
         if (nb) {
             w->bodies = nb;
             w->body_cap = w->body_count;
