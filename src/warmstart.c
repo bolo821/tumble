@@ -101,11 +101,23 @@ void tmb_ws_store(tmb_ws_cache *c, const tmb_world *w)
 
         if (c->slab_count == c->slab_cap) {
             size_t nc = c->slab_cap ? c->slab_cap * 2 : 4;
+            tmb_contact *old_base = c->slab;
             tmb_contact *ns =
                 (tmb_contact *)realloc(c->slab, nc * sizeof(*ns));
             if (!ns) {
                 slot->prev = NULL;
                 continue;
+            }
+            /* If realloc moved the slab, patch every stored prev pointer so
+             * tmb_ws_apply does not read through a dangling address. */
+            if (ns != old_base && old_base) {
+                for (size_t k = 0; k < c->table_cap; k++) {
+                    if (!c->table[k].pair || !c->table[k].prev)
+                        continue;
+                    ptrdiff_t off = c->table[k].prev - old_base;
+                    if (off >= 0 && (size_t)off < c->slab_count)
+                        c->table[k].prev = ns + off;
+                }
             }
             c->slab = ns;
             c->slab_cap = nc;
