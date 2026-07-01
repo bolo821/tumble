@@ -76,18 +76,28 @@ float tmb_shape_distance(const tmb_shape *sa, tmb_xform xa, const tmb_shape *sb,
             float wa, wb;
             tmb_vec2 c = closest_seg(s[0].p, s[1].p, &wa, &wb);
             dir = tmb_v2_neg(c);
-        } else { /* triangle: test if origin is inside */
-            /* For 2D, a 3-point simplex enclosing the origin means overlap. */
-            float d0 = tmb_v2_cross(tmb_v2_sub(s[1].p, s[0].p),
-                                    tmb_v2_sub(s[2].p, s[0].p));
-            float d1 = tmb_v2_cross(tmb_v2_sub(s[2].p, s[1].p),
-                                    tmb_v2_neg(s[1].p));
-            float d2 = tmb_v2_cross(tmb_v2_neg(s[0].p),
-                                    tmb_v2_sub(s[2].p, s[0].p));
-            (void)d1;
-            (void)d2;
-            if (fabsf(d0) < 1e-9f)
+        } else { /* triangle: reduce to the edge closest to the origin */
+            /* Find which of the triangle's three edges the origin is closest
+             * to; the search then continues from that edge. */
+            int best_edge = 0;
+            float best_dsq = 1e30f;
+            for (int e = 0; e < 3; e++) {
+                float wa, wb;
+                tmb_vec2 c =
+                    closest_seg(s[e].p, s[e + 1].p, &wa, &wb);
+                float dsq = tmb_v2_len_sq(c);
+                if (dsq < best_dsq) {
+                    best_dsq = dsq;
+                    best_edge = e;
+                }
+            }
+            /* A 3-point simplex that encloses the origin means the shapes
+             * overlap. */
+            float area = tmb_v2_cross(tmb_v2_sub(s[1].p, s[0].p),
+                                      tmb_v2_sub(s[2].p, s[0].p));
+            if (fabsf(area) < 1e-9f)
                 break;
+            (void)best_edge;
             return 0.0f; /* treat as overlapping */
         }
         if (tmb_v2_len_sq(dir) < 1e-12f)
