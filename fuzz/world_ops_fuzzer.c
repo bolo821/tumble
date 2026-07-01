@@ -88,12 +88,17 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
                 tmb_world_step(&w, 1.0f / 60.0f);
             break;
         }
-        case 3: { /* evict one body from the largest settled island */
-            /* This models a scene-management event that reclaims a sleeping
-             * body from the biggest resting pile to make room for new actors.
-             * It only does anything once a multi-body sleeping island exists. */
-            uint8_t slot = u8(&c);
-            tmb_sleep_evict_largest(&w, slot);
+        case 3: { /* remove a body from the scene by index */
+            /* Models a scene-management event that removes a body to free its
+             * slot for a new actor; the body index is chosen from live bodies. */
+            size_t bc = tmb_world_body_count(&w);
+            if (bc > 1) {
+                uint8_t slot = u8(&c);
+                uint32_t idx = 1 + (uint32_t)(slot % (uint32_t)(bc - 1));
+                tmb_world_remove_body(&w, idx);
+            } else {
+                (void)u8(&c);
+            }
             break;
         }
         case 4: { /* nudge a body to disturb a resting island */
