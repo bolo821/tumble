@@ -56,6 +56,13 @@ void tmb_xjoint_prepare(tmb_xjoint *j, tmb_world *w, float dt);
 /* One velocity iteration. */
 void tmb_xjoint_solve(tmb_xjoint *j, tmb_world *w);
 
+/* Body-removal lifecycle helper for the extended-joint list.  Call after the
+ * body-array swap-pop and body_count decrement, before the compact realloc.
+ * Extended joints with an endpoint on the removed body are evicted; endpoints
+ * that named the moved body ('moved' = old last index) are patched to
+ * 'removed'.  MOUSE joints (a == UINT32_MAX) keep their sentinel a-endpoint. */
+void tmb_xjoints_on_remove(tmb_world *w, uint32_t removed, uint32_t moved);
+
 #ifdef __cplusplus
 }
 #endif

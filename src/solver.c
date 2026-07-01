@@ -186,3 +186,22 @@ void tmb_joints_solve(tmb_world *w)
         }
     }
 }
+
+void tmb_joints_on_remove(tmb_world *w, uint32_t removed, uint32_t moved)
+{
+    if (!w->joints)
+        return;
+    size_t i = 0;
+    while (i < w->joint_count) {
+        tmb_joint *j = &w->joints[i];
+        if (j->a == removed || j->b == removed) {
+            /* Discard via swap-pop; re-examine slot i on the next iteration. */
+            w->joints[i] = w->joints[--w->joint_count];
+            continue;
+        }
+        /* Remap the endpoint that named the body moved into the vacated slot. */
+        if (j->a == moved) j->a = removed;
+        if (j->b == moved) j->b = removed;
+        i++;
+    }
+}

@@ -194,3 +194,28 @@ void tmb_xjoint_solve(tmb_xjoint *j, tmb_world *w)
         return;
     }
 }
+
+void tmb_xjoints_on_remove(tmb_world *w, uint32_t removed, uint32_t moved)
+{
+    if (!w->xjoints)
+        return;
+    tmb_xjoint *xj = (tmb_xjoint *)w->xjoints;
+    size_t i = 0;
+    while (i < w->xjoint_count) {
+        /* A MOUSE joint has a == UINT32_MAX (no body-a endpoint). */
+        int a_gone = (xj[i].a != UINT32_MAX && xj[i].a == removed);
+        int b_gone = (xj[i].b == removed);
+        if (a_gone || b_gone) {
+            /* Discard via swap-pop so the live prefix stays contiguous, then
+             * re-examine slot i (it now holds the swapped-in joint). */
+            xj[i] = xj[--w->xjoint_count];
+            continue;
+        }
+        /* Patch endpoints that named the body moved into the vacated slot. */
+        if (xj[i].a != UINT32_MAX && xj[i].a == moved)
+            xj[i].a = removed;
+        if (xj[i].b == moved)
+            xj[i].b = removed;
+        i++;
+    }
+}

@@ -49,6 +49,14 @@ uint32_t tmb_world_remove_body(tmb_world *w, uint32_t i)
         w->bodies[i] = w->bodies[last];
     w->body_count--;
 
+    /* Keep joint and xjoint endpoint indices consistent with the swap-pop:
+     * evict any constraint whose endpoint was on the removed body, and remap
+     * any endpoint that referred to 'last' (the body moved into slot 'i').
+     * Must run before the compact realloc while the helpers can still tell
+     * valid endpoints apart from the one being removed. */
+    tmb_joints_on_remove(w, i, last);
+    tmb_xjoints_on_remove(w, i, last);
+
     /* Compact the body buffer to the live count so heap tools catch
      * any subsystem that still references the old 'last' index. */
     if (w->body_count > 0) {
