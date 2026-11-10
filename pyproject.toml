@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "quill"
 version = "0.1.0"
 description = "A small code-review platform library."
-authors = [{ name = "Jonah Soriano", email = "mathiasnicolasdev@gmail.com" }]
+authors = [{ name = "Mathias Nicolas", email = "mathiasnicolasdev@gmail.com" }]
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.10"
